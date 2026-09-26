@@ -405,25 +405,30 @@ describe("buddy sub-status cache", () => {
       .toEqual([]);
   });
 
-  test("sweeps old temp files without deleting the cache or lock", async () => {
+  test("sweeps old temp files without deleting the cache, the lock or anything below the state dir", async () => {
     const { configDir, stateDir } = createStatuslineFixture({});
     const cacheFile = join(stateDir, ".substatus.default");
     const staleTemp = join(stateDir, ".substatus.default.old");
+    const nestedTemp = join(stateDir, "app", ".substatus.default.old");
     const lockDir = join(stateDir, ".substatus.default.lock");
     const sweepLock = join(stateDir, ".substatus-sweep.default.lock");
     const oldDate = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
     writeFileSync(cacheFile, "cached\n");
     writeFileSync(staleTemp, "orphan\n");
+    mkdirSync(join(stateDir, "app"));
+    writeFileSync(nestedTemp, "not ours\n");
     mkdirSync(lockDir);
     mkdirSync(sweepLock);
     utimesSync(staleTemp, oldDate, oldDate);
+    utimesSync(nestedTemp, oldDate, oldDate);
     utimesSync(sweepLock, oldDate, oldDate);
 
     expect(runStatusline(configDir).status).toBe(0);
     await waitFor(() => !existsSync(staleTemp));
     await waitFor(() => !existsSync(sweepLock));
     expect(existsSync(staleTemp)).toBe(false);
+    expect(existsSync(nestedTemp)).toBe(true);
     expect(readFileSync(cacheFile, "utf8")).toBe("cached\n");
     expect(existsSync(lockDir)).toBe(true);
   });
@@ -447,6 +452,227 @@ describe("buddy sub-status cache", () => {
 
     expect(result.status).toBe(0);
     expect(lines.every((line) => displayWidth(line) <= 46)).toBe(true);
+  });
+
+  test("measures a sub-status OSC 8 link by its visible text only", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ subStatusCommand: "printf ignored" });
+    const link = "\x1b]8;;https://github.com/ramarivera/coding-buddy/tree/main\x1b\\main\x1b]8;;\x1b\\";
+    writeFileSync(join(stateDir, ".substatus.default"), `~/Repositories/app (${link}) • END-OF-LINE-MARK\n`);
+
+    const out = runStatusline(configDir, "{}\n", "60").stdout.toString();
+
+    expect(out).toContain(`(${link}) • END-OF-LINE-MARK`);
+  });
+
+  test("closes a sub-status OSC 8 link cut by the budget", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ subStatusCommand: "printf ignored" });
+    const open = "\x1b]8;;https://example.org/branch\x1b\\";
+    writeFileSync(join(stateDir, ".substatus.default"), `${"x".repeat(40)} (${open}feature-branch\x1b]8;;\x1b\\)\n`);
+
+    const row = runStatusline(configDir, "{}\n", "60").stdout.toString().split("\n").find((l) => l.includes(open));
+
+    expect(row).toContain(`${open}feat`);
+    expect(row).not.toContain("feature-branch");
+    expect(row!.split("\x1b]8;;").length - 1).toBe(2);
+  });
+
+  test("inline mode puts the buddy at the end of the sub-status row", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      statuslineDensity: "minimal",
+      subStatusInline: true,
+      subStatusCommand: "printf ignored",
+    });
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({
+      reaction: "a reaction far too long to fit in the room this narrow row leaves",
+      timestamp: Date.now(),
+    }));
+    writeFileSync(join(stateDir, ".substatus.default"), "LEFT-SIDE-STATUS\n");
+
+    const lines = runStatusline(configDir, "{}\n", "80").stdout.toString().split("\n").filter(Boolean);
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toStartWith("LEFT-SIDE-STATUS");
+    expect(lines[0]).toContain("Nimbus");
+    expect(lines[0]).toContain("…");
+  });
+
+  test("inline mode falls back to two rows when the buddy does not fit", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      statuslineDensity: "minimal",
+      subStatusInline: true,
+      subStatusCommand: "printf ignored",
+    });
+    writeFileSync(join(stateDir, ".substatus.default"), `${"W".repeat(60)}\n`);
+
+    const lines = runStatusline(configDir, "{}\n", "80").stdout.toString().split("\n").filter(Boolean);
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Nimbus");
+    expect(lines[1]).toStartWith("W".repeat(60));
+  });
+
+  test("clickToExpand links the name to coding-buddy://toggle", () => {
+    const { configDir } = createStatuslineFixture({ statuslineDensity: "minimal", clickToExpand: true });
+
+    const out = runStatusline(configDir, "{}\n", "80").stdout.toString();
+
+    expect(out).toContain("\x1b]8;;coding-buddy://toggle\x1b\\Nimbus");
+  });
+
+  test("expanded shows the whole reaction and puts the name on the sub-status row", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      statuslineDensity: "minimal",
+      subStatusInline: true,
+      expanded: true,
+      subStatusCommand: "printf ignored",
+    });
+    const reaction = "a reaction far too long to fit in the room a single narrow row leaves";
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction, timestamp: Date.now() }));
+    writeFileSync(join(stateDir, ".substatus.default"), "LEFT-SIDE-STATUS\n");
+
+    const lines = runStatusline(configDir, "{}\n", "120").stdout.toString().split("\n").filter(Boolean);
+
+    expect(lines.length).toBeGreaterThan(2);
+    expect(lines.at(-1)).toStartWith("LEFT-SIDE-STATUS");
+    expect(lines.at(-1)).toContain("Nimbus");
+    expect(lines.join("\n").split("Nimbus")).toHaveLength(2);
+    for (const word of reaction.split(" ")) expect(lines.join(" ")).toContain(word);
+  });
+
+  test("expanded keeps the name on its own row when the sub-status leaves no room", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      subStatusInline: true,
+      expanded: true,
+      subStatusCommand: "printf ignored",
+    });
+    writeFileSync(join(stateDir, ".substatus.default"), `${"W".repeat(100)}\n`);
+
+    const lines = runStatusline(configDir, "{}\n", "120").stdout.toString().split("\n").filter(Boolean);
+
+    expect(lines.at(-1)).toBe("W".repeat(100));
+    expect(lines.at(-2)).toContain("Nimbus");
+  });
+
+  test("a configured color replaces the rarity color", () => {
+    const { configDir } = createStatuslineFixture({ statuslineDensity: "minimal", color: "#4EBA65" });
+
+    const out = runStatusline(configDir, "{}\n", "80").stdout.toString();
+
+    expect(out).toContain("\x1b[38;2;78;186;101m");
+    expect(out).not.toContain("\x1b[38;2;153;153;153m");
+  });
+
+  test("showRarity false drops the stars from the name", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "minimal" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, stars: "★" }));
+    expect(runStatusline(configDir, "{}\n", "80").stdout.toString()).toContain("Nimbus ★");
+
+    writeFileSync(join(stateDir, "config.json"), JSON.stringify({ statuslineDensity: "minimal", showRarity: false }));
+
+    expect(runStatusline(configDir, "{}\n", "80").stdout.toString()).not.toContain("★");
+  });
+
+  test("animate false keeps the same frame whatever the clock says", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, frames: ["  art-A", "  art-B"], frameSequence: [0, 1] }));
+    const at = (now: string) => runStatusline(configDir, "{}\n", "80", { BUDDY_FAKE_NOW: now }).stdout.toString();
+    expect(at("1")).not.toBe(at("2"));
+
+    writeFileSync(join(stateDir, "config.json"), JSON.stringify({ statuslineDensity: "full", animate: false }));
+
+    expect(at("1")).toBe(at("2"));
+    expect(at("1")).toContain("art-A");
+  });
+
+  test("animate focused moves only the iTerm2 session named in focused-session", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full", animate: "focused" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, frames: ["  art-A", "  art-B"], frameSequence: [0, 1] }));
+    writeFileSync(join(stateDir, "focused-session"), "AAA");
+    const at = (now: string, session: string) =>
+      runStatusline(configDir, "{}\n", "80", { BUDDY_FAKE_NOW: now, ITERM_SESSION_ID: session }).stdout.toString();
+
+    expect(at("1", "w0t0p0:AAA")).not.toBe(at("2", "w0t0p0:AAA"));
+    expect(at("1", "w0t1p0:BBB")).toBe(at("2", "w0t1p0:BBB"));
+    expect(at("1", "")).not.toBe(at("2", ""));
+  });
+
+  test("an unfocused session reprints its cached render until something it reads changes", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "minimal", animate: "focused" });
+    writeFileSync(join(stateDir, "focused-session"), "AAA");
+    const now = String(Math.floor(Date.now() / 1000));
+    const run = (session: string) =>
+      runStatusline(configDir, "{}\n", "80", { BUDDY_FAKE_NOW: now, ITERM_SESSION_ID: session }).stdout.toString();
+    const cache = join(stateDir, ".render.default");
+
+    run("w0t1p0:BBB");
+    writeFileSync(cache, `${readFileSync(cache, "utf8").split("\n")[0]}\nFROM-CACHE\n`);
+
+    expect(run("w0t1p0:BBB")).toBe("FROM-CACHE\n");
+    expect(run("w0t0p0:AAA")).not.toContain("FROM-CACHE");
+
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction: "NEW-REACTION", timestamp: Date.now() }));
+
+    expect(run("w0t1p0:BBB")).toContain("NEW-REACTION");
+  });
+
+  test("bubble text is italic in the buddy color, not faint", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full", color: "#EEEEEE" });
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction: "READABLE-TEXT", timestamp: Date.now() }));
+
+    const row = runStatusline(configDir, "{}\n", "120").stdout.toString().split("\n").find((l) => l.includes("READABLE-TEXT"));
+
+    expect(row).toMatch(/\x1b\[38;2;238;238;238m\|\x1b\[3m\s*READABLE-TEXT/);
+    expect(row).not.toContain("\x1b[2;3m");
+  });
+
+  test("bubbleColor paints the bubble while the buddy keeps its own color", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full", color: "#EEEEEE", bubbleColor: "#A0A0A0" });
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction: "MUTED-TEXT", timestamp: Date.now() }));
+    const muted = "\x1b[38;2;160;160;160m";
+    const buddy = "\x1b[38;2;238;238;238m";
+
+    const lines = runStatusline(configDir, "{}\n", "120").stdout.toString().split("\n");
+
+    expect(lines.find((l) => l.includes(".---"))).toContain(`${muted}.---`);
+    expect(lines.find((l) => l.includes("MUTED-TEXT"))).toContain(`${muted}|\x1b[3m`);
+    expect(lines.find((l) => l.includes("Nimbus"))).toContain(buddy);
+  });
+
+  test("bubbleColor paints the reaction in the one-row layout", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      statuslineDensity: "minimal",
+      subStatusInline: true,
+      subStatusCommand: "printf ignored",
+      color: "#EEEEEE",
+      bubbleColor: "#A0A0A0",
+    });
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction: "short", timestamp: Date.now() }));
+    writeFileSync(join(stateDir, ".substatus.default"), "LEFT\n");
+
+    const row = runStatusline(configDir, "{}\n", "120").stdout.toString().split("\n")[0];
+
+    expect(row).toContain("\x1b[38;2;238;238;238m  art Nimbus");
+    expect(row).toContain('\x1b[38;2;160;160;160m │ "short"');
+  });
+
+  test("drops the art's blank top line in every frame, but keeps a hat line", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    const render = (frames: string[], now: string) => {
+      writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, frames, frameSequence: [0, 1] }));
+      return runStatusline(configDir, "{}\n", "80", { BUDDY_FAKE_NOW: now }).stdout.toString().split("\n").filter(Boolean);
+    };
+
+    const resting = render(["            \n  BODY-A", "     o      \n  BODY-B"], "0");
+    const blowing = render(["            \n  BODY-A", "     o      \n  BODY-B"], "1");
+    expect(resting[0]).toContain("BODY-A");
+    expect(blowing).toHaveLength(resting.length);
+
+    const hatted = render(["    HAT     \n  BODY-A", "    HAT     \n  BODY-B"], "0");
+    expect(hatted[0]).toContain("HAT");
   });
 
   test("uses the 15-second default and honors a numeric TTL override", async () => {

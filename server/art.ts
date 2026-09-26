@@ -44,7 +44,7 @@ export const SPECIES_ART: Record<Species, string[][]> = {
   octopus: [
     ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
     ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)  ", "  \\/\\/\\/\\/  "],
-    ["     o      ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
+    ["            ", "   .----. o ", "  ( {E}  {E} )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
   ],
   owl: [
     ["            ", "   /\\  /\\   ", "  (({E})({E}))  ", "  (  ><  )  ", "   `----'   "],
@@ -261,17 +261,59 @@ export const STATUS_FRAME_SEQUENCE: readonly number[] = [
   0, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 2, 0, 0, 0,
 ];
 
+// Offsets into a smoke action's frames: a drag, the smoke, a second drag.
+const SMOKE_SEQUENCE = [0, 0, 1, 1, 2, 3, 3, 0, 1, 1, 2, 3, 3, 0];
+
+// Octopus-only actions, one drawn at random every 30 seconds: a cigarette, a pipe or a wave. The top
+// row stays blank and every row keeps the resting width, so the panel never changes size mid-action.
+// In the one-row faces the extras sit around the face; the name stays pinned to the right edge.
+const STATUS_ACTIONS: Partial<Record<Species, Array<{ frames: string[][]; faces: string[]; sequence: number[] }>>> = {
+  octopus: [
+    {
+      frames: [
+        ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
+        ["            ", "   .----.   ", "  ( -  - )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
+        ["            ", "   .----.   ", "  ( {E}  {E} )   ~", "  (______)===*", "  /\\/\\/\\/\\  "],
+        ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)===*", "  \\/\\/\\/\\/  "],
+      ],
+      faces: [" *===~({E}{E})~", " *===~(--)~", "°*===~({E}{E})~", "~*===~({E}{E})~"],
+      sequence: SMOKE_SEQUENCE,
+    },
+    {
+      frames: [
+        ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
+        ["            ", "   .----.   ", "  ( -  - )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
+        ["            ", "   .----.   ", "  ( {E}  {E} )   ~", "  (______)___u", "  /\\/\\/\\/\\  "],
+        ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)___u", "  \\/\\/\\/\\/  "],
+      ],
+      faces: [" u___~({E}{E})~", " u___~(--)~", "°u___~({E}{E})~", "~u___~({E}{E})~"],
+      sequence: SMOKE_SEQUENCE,
+    },
+    {
+      frames: [
+        ["            ", "   .----.   \\", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
+        ["            ", "   .----.   /", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
+      ],
+      faces: ["~({E}{E})~\\", "~({E}{E})~/"],
+      sequence: [0, 1, 0, 1, 0, 1, 0, 1],
+    },
+  ],
+};
+
+// Every 30 seconds: one normal cycle, then an action padded with resting ticks to another cycle.
+const ACTION_SLOT_TICKS = STATUS_FRAME_SEQUENCE.length;
+const ACTION_PATTERN_SLOTS = 40;
+
 // Pre-resolves eye, hat overlay, and blink so the statusline shell does no art
 // work — it just cycles whatever frames the server writes. Each frame is a
 // \n-joined 5-line string (one jq call + mapfile in bash).
-export function getStatusFrames(bones: BuddyBones): {
+export function getStatusFrames(bones: BuddyBones, random: () => number = Math.random): {
   frames: string[];
   compactFrames: string[];
   minimalFrames: string[];
   frameSequence: number[];
 } {
-  const resolveFrame = (frameIdx: number, eyeGlyph: string): string => {
-    const raw = SPECIES_ART[bones.species][frameIdx];
+  const resolveArt = (raw: string[], eyeGlyph: string): string => {
     const art = raw.map((line) => line.replace(/\{E\}/g, eyeGlyph));
     const hatLine = HAT_ART[bones.hat];
     if (hatLine && !art[0].trim()) {
@@ -279,6 +321,8 @@ export function getStatusFrames(bones: BuddyBones): {
     }
     return art.join("\n");
   };
+  const resolveFrame = (frameIdx: number, eyeGlyph: string): string =>
+    resolveArt(SPECIES_ART[bones.species][frameIdx], eyeGlyph);
 
   // Compact: keep the first three non-empty rows of each full frame. This
   // preserves a hat if it occupies the top row, otherwise it drops the blank
@@ -304,11 +348,35 @@ export function getStatusFrames(bones: BuddyBones): {
     resolveFrame(2, eye),
     resolveFrame(0, "-"),
   ];
+  const minimalFrames = Array.from({ length: frames.length }, () => renderFace(bones.species, eye));
+  let frameSequence = [...STATUS_FRAME_SEQUENCE];
+  const actions = STATUS_ACTIONS[bones.species];
+  if (actions) {
+    const firsts = actions.map((action) => {
+      const first = frames.length;
+      frames.push(...action.frames.map((raw) => resolveArt(raw, eye)));
+      minimalFrames.push(...action.faces.map((face) => face.replace(/\{E\}/g, eye)));
+      return first;
+    });
+    // The cigarette and pipe reach past the resting art; padding every frame to the widest keeps the buddy
+    // from sliding sideways whenever the animation switches frames.
+    const width = Math.max(...frames.flatMap((f) => f.split("\n").map(displayWidth)));
+    for (let i = 0; i < frames.length; i++) {
+      frames[i] = frames[i].split("\n").map((l) => l + " ".repeat(width - displayWidth(l))).join("\n");
+    }
+    // The status line only replays frameSequence, so each slot's action is drawn here, in a 20-minute
+    // loop that is drawn again whenever status.json is rewritten.
+    frameSequence = Array.from({ length: ACTION_PATTERN_SLOTS }, () => {
+      const pick = Math.floor(random() * actions.length);
+      const played = actions[pick].sequence.map((offset) => firsts[pick] + offset);
+      return [...STATUS_FRAME_SEQUENCE, ...played, ...Array(ACTION_SLOT_TICKS - played.length).fill(0)];
+    }).flat();
+  }
   return {
     frames,
     compactFrames: deriveCompactFrames(frames),
-    minimalFrames: Array.from({ length: frames.length }, () => renderFace(bones.species, eye)),
-    frameSequence: [...STATUS_FRAME_SEQUENCE],
+    minimalFrames,
+    frameSequence,
   };
 }
 

@@ -116,16 +116,48 @@ describe("getStatusFrames", () => {
     expect(frameSequence).toEqual([...STATUS_FRAME_SEQUENCE]);
   });
 
-  test("every species produces 4 frames, each with 5-6 lines", () => {
+  test("every species produces at least 4 frames, each with 5-6 lines", () => {
     for (const species of SPECIES) {
       const { frames } = getStatusFrames(bones({ species }));
-      expect(frames).toHaveLength(4);
+      expect(frames.length).toBeGreaterThanOrEqual(4);
       for (const body of frames) {
         const lines = body.split("\n").length;
         expect(lines).toBeGreaterThanOrEqual(5);
         expect(lines).toBeLessThanOrEqual(6);
       }
     }
+  });
+
+  test("every 30 seconds the octopus does a random action from its pool, at the resting frame's size", () => {
+    const octopus = bones({ species: "octopus", eye: "@" });
+    const marks = { cigarette: "(______)===*", pipe: "(______)___u", wave: "(______)__/" };
+    const acting = (frame: string) => Object.values(marks).some((mark) => frame.includes(mark));
+    let calls = 0;
+    const { frames, minimalFrames, frameSequence } = getStatusFrames(octopus, () => [0, 0.4, 0.8][calls++ % 3]);
+    const resting = frames[0].split("\n");
+
+    for (const frame of frames.filter(acting)) {
+      expect(frame.split("\n")).toHaveLength(resting.length);
+      expect(frame.split("\n")[0].trim()).toBe("");
+    }
+    for (const line of frames.flatMap((f) => f.split("\n"))) expect(displayWidth(line)).toBe(displayWidth(resting[1]));
+
+    for (let slot = 0; slot * 30 < frameSequence.length; slot++) {
+      expect(frameSequence.slice(slot * 30, slot * 30 + 30).some((i) => acting(frames[i]))).toBe(true);
+    }
+    for (const mark of Object.values(marks)) expect(frameSequence.some((i) => frames[i].includes(mark))).toBe(true);
+    for (const face of [" *===~(", " u___~(", ")~/"]) expect(frameSequence.some((i) => minimalFrames[i].includes(face))).toBe(true);
+    expect(frameSequence.filter((i) => acting(frames[i])).length).toBeLessThanOrEqual(frameSequence.length / 2);
+
+    const cigarettesOnly = getStatusFrames(octopus, () => 0);
+    expect(cigarettesOnly.frameSequence.some((i) => cigarettesOnly.frames[i].includes("___u") || cigarettesOnly.frames[i].includes("__/"))).toBe(false);
+  });
+
+  test("the octopus's bubble floats beside its head so the status line can drop the top row", () => {
+    const { frames } = getStatusFrames(bones({ species: "octopus", eye: "@" }));
+    const bubble = frames[2].split("\n");
+    expect(bubble[0].trim()).toBe("");
+    expect(bubble[1]).toMatch(/\.----\.\s+o/);
   });
 
   test("eye is replaced in idle frames", () => {

@@ -44,6 +44,25 @@ STATE="$BUDDY_STATE_DIR/status.json"
 CONFIG_FILE="$BUDDY_STATE_DIR/config.json"
 # Per-session ID resolved by paths.sh (CLAUDE_CODE_SESSION_ID > TMUX_PANE > default)
 SID="$BUDDY_SID"
+REACTION_FILE="$BUDDY_STATE_DIR/reaction.$SID.json"
+BUDDY_STATUSLINE_INPUT=$(cat)
+
+# Unfocused iTerm2 sessions under animate "focused" reprint their last render while nothing it reads
+# has changed; the 10-second bucket still lets clocks, reaction expiry and the sub-status move.
+RENDER_CACHE=""
+if [ -n "${ITERM_SESSION_ID:-}" ] && grep -q '"animate": *"focused"' "$CONFIG_FILE" 2>/dev/null \
+    && [ "$(cat "$BUDDY_STATE_DIR/focused-session" 2>/dev/null)" != "${ITERM_SESSION_ID#*:}" ]; then
+    RENDER_CACHE="$BUDDY_STATE_DIR/.render.$SID"
+    _read_files=("$STATE" "$CONFIG_FILE" "$REACTION_FILE" "$BUDDY_STATE_DIR/.substatus.$SID")
+    RENDER_KEY=$({
+        printf '%s\n%s\n' "$BUDDY_STATUSLINE_INPUT" "$(( ${BUDDY_FAKE_NOW:-$(date +%s)} / 10 ))"
+        stat -f '%Fm' "${_read_files[@]}" 2>/dev/null || stat -c '%.9Y' "${_read_files[@]}" 2>/dev/null
+    } | cksum)
+    if [ "$(head -n 1 "$RENDER_CACHE" 2>/dev/null)" = "$RENDER_KEY" ]; then
+        tail -n +2 "$RENDER_CACHE"
+        exit 0
+    fi
+fi
 
 [ -f "$STATE" ] || exit 0
 
@@ -56,15 +75,12 @@ NAME=$(jq -r '.name // ""' "$STATE" 2>/dev/null)
 RARITY=$(jq -r '.rarity // "common"' "$STATE" 2>/dev/null)
 STARS=$(jq -r '.stars // ""' "$STATE" 2>/dev/null)
 SHINY=$(jq -r '.shiny // false' "$STATE" 2>/dev/null)
-REACTION_FILE="$BUDDY_STATE_DIR/reaction.$SID.json"
 ACHIEVEMENT=$(jq -r '.achievement // ""' "$STATE" 2>/dev/null)
 # "absent" distinguishes a legacy status.json (no field at all) from an explicit
 # 0, which means "no achievement pending" and must not render.
 ACHIEVEMENT_AT=$(jq -r 'if has("achievementAt") then (.achievementAt // 0) else "absent" end' "$STATE" 2>/dev/null)
 LEVEL=$(jq -r '.level // 1' "$STATE" 2>/dev/null)
 MOOD=$(jq -r '.mood // "focused"' "$STATE" 2>/dev/null)
-
-BUDDY_STATUSLINE_INPUT=$(cat)
 
 # ─── Animation timing ───────────────────────────────────────────────────────
 NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
@@ -112,7 +128,25 @@ RAINBOW=(
   $'\033[38;2;180;50;220m'
 )
 
+ANIMATE=1
 if [ -f "$CONFIG_FILE" ]; then
+    # A clock-driven frame changes every session's status line in the same second; "focused" animates
+    # only the iTerm2 session named in focused-session, written by scripts/macos/buddy_focus.py.
+    case "$(jq -r 'if .animate == null then "true" else (.animate | tostring) end' "$CONFIG_FILE" 2>/dev/null)" in
+        false) ANIMATE=0 ;;
+        focused)
+            if [ -n "${ITERM_SESSION_ID:-}" ]; then
+                _focused=$(cat "$BUDDY_STATE_DIR/focused-session" 2>/dev/null)
+                [ "$_focused" = "${ITERM_SESSION_ID#*:}" ] || ANIMATE=0
+            fi
+            ;;
+    esac
+    _color=$(jq -r '.color // ""' "$CONFIG_FILE" 2>/dev/null)
+    [[ "$_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && C=$(_hex_to_ansi "$_color")
+    _bubble_color=$(jq -r '.bubbleColor // ""' "$CONFIG_FILE" 2>/dev/null)
+    [[ "$_bubble_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && BC=$(_hex_to_ansi "$_bubble_color")
+    # "// true" would turn an explicit false into true.
+    [ "$(jq -r '.showRarity == false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && STARS=""
     _custom=$(jq -r '(.rainbowColors // []) | @tsv' "$CONFIG_FILE" 2>/dev/null)
     if [ -n "$_custom" ]; then
         RAINBOW=()
@@ -126,7 +160,7 @@ COLOR_ENABLED=1
 [ -n "${NO_COLOR:-}" ] && COLOR_ENABLED=0
 
 RAINBOW_LEN=${#RAINBOW[@]}
-RAINBOW_OFFSET=$(( NOW % RAINBOW_LEN ))
+RAINBOW_OFFSET=$(( ANIMATE ? NOW % RAINBOW_LEN : 0 ))
 
 _is_positive_int() {
     case "$1" in
@@ -240,7 +274,13 @@ REACTION_TTL=900
 INNER_W=44
 MARGIN=8
 DENSITY="auto"
+SUBSTATUS_INLINE=0
+EXPANDED=0
+CLICK_TO_EXPAND=0
 if [ -f "$CONFIG_FILE" ]; then
+    [ "$(jq -r '.subStatusInline // false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && SUBSTATUS_INLINE=1
+    [ "$(jq -r '.expanded // false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && EXPANDED=1
+    [ "$(jq -r '.clickToExpand // false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && CLICK_TO_EXPAND=1
     _ttl=$(jq -r '.reactionTTL // 900' "$CONFIG_FILE" 2>/dev/null || echo 900)
     case "$_ttl" in ''|*[!0-9]*) ;; *) REACTION_TTL="$_ttl" ;; esac
     _bw=$(jq -r '.bubbleWidth // 44' "$CONFIG_FILE" 2>/dev/null || echo 44)
@@ -282,6 +322,7 @@ case "$DENSITY" in
         fi
         ;;
 esac
+[ "$EXPANDED" -eq 1 ] && TIER="full"
 
 _sweep_expired_reactions() {
     [ "$REACTION_TTL" -gt 0 ] 2>/dev/null || return 0
@@ -361,13 +402,17 @@ fi
 
 # ─── Animation: pick current density frame from server-rendered frames ───────
 NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
-FRAME_BODY=$(jq -r --argjson now "$NOW" --arg tier "$TIER" '
-    .frameSequence[$now % (.frameSequence | length)] as $idx
-    | if $tier == "compact" then ((.compactFrames? // .frames) | .[$idx] // .frames[$idx])
-      elif $tier == "minimal" then ((.minimalFrames? // .frames) | .[$idx] // .frames[$idx])
-      else .frames[$idx]
-      end // ""
+FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" '
+    (if $tier == "compact" then (.compactFrames? // .frames)
+     elif $tier == "minimal" then (.minimalFrames? // .frames)
+     else .frames end) as $set
+    | .frameSequence[$now % (.frameSequence | length)] as $idx
+    | ((($set[0] // .frames[0] // "") | split("\n")[0] | test("^\\s*$")) | if . then "trim" else "keep" end)
+      + "\n" + (($set[$idx] // .frames[$idx]) // "")
 ' "$STATE" 2>/dev/null)
+TOP_LINE_MODE="${FRAME_OUT%%$'\n'*}"
+FRAME_BODY="${FRAME_OUT#*$'\n'}"
+[ "$FRAME_BODY" = "$FRAME_OUT" ] && FRAME_BODY=""
 
 # Fallback when status.json lacks .frames — e.g. server/bash version skew
 # during install or while the MCP server hasn't rewritten the file yet. Keep
@@ -380,6 +425,11 @@ ART_LINES=()
 while IFS= read -r line; do
     ART_LINES+=("$line")
 done <<< "$FRAME_BODY"
+# A blank top line in the resting frame is headroom for a hat; dropping it in every frame keeps the
+# panel one row shorter at a fixed height, at the cost of art drawn there only mid-animation.
+if [ "$TOP_LINE_MODE" = "trim" ] && [ "$TIER" != "minimal" ] && [ "${#ART_LINES[@]}" -gt 1 ]; then
+    ART_LINES=("${ART_LINES[@]:1}")
+fi
 
 # ─── Build all art lines ──────────────────────────────────────────────────────
 # ART_LINES comes from the pre-rendered frame (already includes hat + blink).
@@ -404,12 +454,15 @@ NAME_PAD=$(( ART_CENTER - NAME_LEN / 2 ))
 [ "$NAME_PAD" -lt 0 ] && NAME_PAD=0
 NAME_LINE="$(printf '%*s%s' "$NAME_PAD" '' "$NAME_WITH_LEVEL")"
 
-DIM=$'\033[2;3m'
+BC="${BC:-$C}"
+# Italic only: faint on top of italic made the bubble text hard to read.
+ITALIC=$'\033[3m'
 if [ "$COLOR_ENABLED" -eq 0 ]; then
     C=""
+    BC=""
     NC=""
     NEUTRAL=""
-    DIM=""
+    ITALIC=""
     for _rainbow_index in "${!RAINBOW[@]}"; do
         RAINBOW[$_rainbow_index]=""
     done
@@ -450,7 +503,7 @@ EMOJI_TEXT_DATA="$(dirname "${BASH_SOURCE[0]}")/emoji-text.data"
 EMOJI_TEXT="$(grep -v '^#' "$EMOJI_TEXT_DATA" 2>/dev/null | tr -d '\n')"
 
 dwidth() {
-    printf '%s' "$1" | iconv -f UTF-8 -t UTF-32LE 2>/dev/null | od -An -tu4 | awk -v pres="$EMOJI_PRES_2600" -v text="$EMOJI_TEXT" '
+    printf '%s' "$1" | iconv -f UTF-8 -t UTF-32LE 2>/dev/null | od -An -tu4 -v | awk -v pres="$EMOJI_PRES_2600" -v text="$EMOJI_TEXT" '
     function load_ranges(value, target,    n, i, count, piece, bounds, start, end, cp) {
         n = split(value, ranges, ",")
         for (i = 1; i <= n; i++) {
@@ -490,7 +543,7 @@ dwidth() {
 # Emit one display-width value per UTF-8 codepoint. ANSI-aware truncation uses
 # this profile to make one Unicode-width pass over the complete output row.
 dwidth_profile() {
-    printf '%s' "$1" | iconv -f UTF-8 -t UTF-32LE 2>/dev/null | od -An -tu4 | awk -v pres="$EMOJI_PRES_2600" -v text="$EMOJI_TEXT" '
+    printf '%s' "$1" | iconv -f UTF-8 -t UTF-32LE 2>/dev/null | od -An -tu4 -v | awk -v pres="$EMOJI_PRES_2600" -v text="$EMOJI_TEXT" '
     function load_ranges(value, target,    n, i, count, piece, bounds, start, end, cp) {
         n = split(value, ranges, ",")
         for (i = 1; i <= n; i++) {
@@ -711,6 +764,19 @@ if [ $BUBBLE_COUNT -gt 0 ] && [ $BUBBLE_COUNT -lt $ART_COUNT ]; then
     BUBBLE_START=$(( (ART_COUNT - BUBBLE_COUNT) / 2 ))
 fi
 
+# An inline sub-status shares the name row, so the name must be the last row with
+# no bubble beside it: the art drops below a bubble taller than the art above the name.
+ART_START=0
+if [ "$TIER" != "minimal" ] && [ "$SUBSTATUS_INLINE" -eq 1 ]; then
+    _body=$(( ART_COUNT - 1 ))
+    if [ "$BUBBLE_COUNT" -gt "$_body" ]; then
+        ART_START=$(( BUBBLE_COUNT - _body ))
+        BUBBLE_START=0
+    else
+        BUBBLE_START=$(( (_body - BUBBLE_COUNT) / 2 ))
+    fi
+fi
+
 # ─── Find the connector line (middle text line → points to buddy's mouth) ─────
 # The connector goes on the middle text row of the bubble
 CONNECTOR_BI=-1
@@ -723,12 +789,14 @@ fi
 
 # ─── Output: merged bubble box + art per line ──────────────────────────────────
 TOTAL_BUBBLE=$(( BUBBLE_START + BUBBLE_COUNT ))
-MAX_LINES=$(( ART_COUNT > TOTAL_BUBBLE ? ART_COUNT : TOTAL_BUBBLE ))
+TOTAL_ART=$(( ART_START + ART_COUNT ))
+MAX_LINES=$(( TOTAL_ART > TOTAL_BUBBLE ? TOTAL_ART : TOTAL_BUBBLE ))
 OUTPUT_LINES=()
 for (( i=0; i<MAX_LINES; i++ )); do
     # Art part: actual art line or blank filler
-    if [ $i -lt $ART_COUNT ]; then
-        art_part="${ALL_COLORS[$i]}${ALL_LINES[$i]}${NC}"
+    ai=$(( i - ART_START ))
+    if [ $ai -ge 0 ] && [ $ai -lt $ART_COUNT ]; then
+        art_part="${ALL_COLORS[$ai]}${ALL_LINES[$ai]}${NC}"
     else
         art_part=$(printf '%*s' "$ART_W" '')
     fi
@@ -741,18 +809,18 @@ for (( i=0; i<MAX_LINES; i++ )); do
 
             # Connector: "-- " on the middle text line, spaces otherwise.
             if [ $bi -eq $CONNECTOR_BI ]; then
-                gap="${C}--${NC} "
+                gap="${BC}--${NC} "
             else
                 gap="   "
             fi
 
             if [ "$btype" = "border" ]; then
-                OUTPUT_LINES+=("${SPACER}${C}${bline}${NC}${gap}${art_part}")
+                OUTPUT_LINES+=("${SPACER}${BC}${bline}${NC}${gap}${art_part}")
             else
                 pipe_l="${bline:0:1}"
                 pipe_r="${bline: -1}"
                 inner="${bline:1:$(( ${#bline} - 2 ))}"
-                OUTPUT_LINES+=("${SPACER}${C}${pipe_l}${NC}${DIM}${inner}${NC}${C}${pipe_r}${NC}${gap}${art_part}")
+                OUTPUT_LINES+=("${SPACER}${BC}${pipe_l}${ITALIC}${inner}${NC}${BC}${pipe_r}${NC}${gap}${art_part}")
             fi
         else
             empty=$(printf '%*s' "$BOX_W" '')
@@ -763,6 +831,43 @@ for (( i=0; i<MAX_LINES; i++ )); do
     fi
 done
 
+# Sets ANSI_SEQ_END past the escape sequence at index $2. An OSC (hyperlink)
+# ends at ST or BEL, never at an "m": its URL can contain one.
+ansi_seq_end() {
+    local text="$1" len=${#1} i=$(( $2 + 1 )) char
+    if [ "${text:$i:1}" = "]" ]; then
+        while [ "$i" -lt "$len" ]; do
+            char="${text:$i:1}"
+            if [ "$char" = $'\a' ]; then ANSI_SEQ_END=$(( i + 1 )); return; fi
+            if [ "$char" = $'\033' ] && [ "${text:$(( i + 1 )):1}" = "\\" ]; then ANSI_SEQ_END=$(( i + 2 )); return; fi
+            i=$(( i + 1 ))
+        done
+        ANSI_SEQ_END=$len
+        return
+    fi
+    while [ "$i" -lt "$len" ]; do
+        char="${text:$i:1}"
+        i=$(( i + 1 ))
+        [ "$char" = "m" ] && break
+    done
+    ANSI_SEQ_END=$i
+}
+
+# Sets ANSI_PLAIN to $1 without escape sequences.
+ansi_strip() {
+    local text="$1" len=${#1} i=0
+    ANSI_PLAIN=""
+    while [ "$i" -lt "$len" ]; do
+        if [ "${text:$i:1}" = $'\033' ]; then
+            ansi_seq_end "$text" "$i"
+            i=$ANSI_SEQ_END
+            continue
+        fi
+        ANSI_PLAIN="${ANSI_PLAIN}${text:$i:1}"
+        i=$(( i + 1 ))
+    done
+}
+
 ansi_truncate() {
     local text="$1"
     local max_width="$2"
@@ -770,7 +875,7 @@ ansi_truncate() {
     local plain=""
     local i=0
     local text_len=${#text}
-    local char seq char_width truncated=0 saw_sgr=0
+    local char seq char_width truncated=0 saw_sgr=0 link_open=0
     local visible_width=0
     local -a widths
     local visible_index=0
@@ -780,21 +885,9 @@ ansi_truncate() {
     # Strip SGR while building the one string sent to dwidth_profile. The
     # profile uses one iconv/od/awk pass for the whole row; never spawn a
     # subprocess for each Unicode character.
-    while [ "$i" -lt "$text_len" ]; do
-        char="${text:$i:1}"
-        if [ "$char" = $'\033' ]; then
-            saw_sgr=1
-            i=$(( i + 1 ))
-            while [ "$i" -lt "$text_len" ]; do
-                char="${text:$i:1}"
-                i=$(( i + 1 ))
-                [ "$char" = "m" ] && break
-            done
-            continue
-        fi
-        plain="${plain}${char}"
-        i=$(( i + 1 ))
-    done
+    ansi_strip "$text"
+    plain="$ANSI_PLAIN"
+    [ "$plain" != "$text" ] && saw_sgr=1
 
     widths=()
     if [ -n "$plain" ]; then
@@ -807,15 +900,14 @@ ansi_truncate() {
     while [ "$i" -lt "$text_len" ]; do
         char="${text:$i:1}"
         if [ "$char" = $'\033' ]; then
-            seq="$char"
-            i=$(( i + 1 ))
-            while [ "$i" -lt "$text_len" ]; do
-                char="${text:$i:1}"
-                seq="${seq}${char}"
-                i=$(( i + 1 ))
-                [ "$char" = "m" ] && break
-            done
+            ansi_seq_end "$text" "$i"
+            seq="${text:$i:$(( ANSI_SEQ_END - i ))}"
+            case "$seq" in
+                $'\033]8;'*";"$'\033\\'|$'\033]8;'*";"$'\a') link_open=0 ;;
+                $'\033]8;'*) link_open=1 ;;
+            esac
             out="${out}${seq}"
+            i=$ANSI_SEQ_END
             continue
         fi
 
@@ -830,6 +922,7 @@ ansi_truncate() {
         i=$(( i + 1 ))
     done
 
+    [ "$truncated" -eq 1 ] && [ "$link_open" -eq 1 ] && out="${out}"$'\033]8;;\033\\'
     [ "$truncated" -eq 1 ] && [ "$saw_sgr" -eq 1 ] && out="${out}${NC}"
     printf '%s' "$out"
 }
@@ -839,12 +932,84 @@ statusline_output_line() {
     printf '\n'
 }
 
-for line in "${OUTPUT_LINES[@]}"; do
-    statusline_output_line "$line"
-done
+# Sets SUBSTATUS_LEFT and its width from a one-line sub-status cache; fails otherwise.
+read_single_substatus() {
+    local cache="$BUDDY_STATE_DIR/.substatus.$SID"
+    [ -f "$cache" ] && [ "$(wc -l < "$cache")" -le 1 ] || return 1
+    IFS= read -r SUBSTATUS_LEFT < "$cache" || [ -n "$SUBSTATUS_LEFT" ] || return 1
+    ansi_strip "$SUBSTATUS_LEFT"
+    SUBSTATUS_LEFT_W=$(dwidth "$ANSI_PLAIN")
+}
 
-# Append the last cached sub-status result below the buddy panel and refresh
-# it asynchronously when stale. The statusline itself never waits on it.
-append_substatus
+# Puts the buddy at the right end of the cached one-line sub-status, trimming the
+# reaction to the room left. Prints nothing when even the face and name do not fit.
+inline_substatus_row() {
+    local buddy buddy_w room text_room text reaction_part=""
+    read_single_substatus || return 0
+    local left="$SUBSTATUS_LEFT"
+    room=$(( STATUSLINE_BUDGET - SUBSTATUS_LEFT_W - 2 ))
+    buddy="${_face_plain} ${NAME_WITH_LEVEL}"
+    buddy_w=$(dwidth "$buddy")
+    [ "$buddy_w" -le "$room" ] || return 0
+    text_room=$(( room - buddy_w - 5 ))
+    if [ -n "$REACTION" ] && [ "$text_room" -ge 8 ]; then
+        text="$REACTION"
+        [ "$(dwidth "$text")" -le "$text_room" ] || text="$(ansi_truncate "$text" $(( text_room - 1 )))…"
+        reaction_part=" │ \"${text}\""
+        buddy_w=$(dwidth "${buddy}${reaction_part}")
+    fi
+    printf '%s%*s%s%s%s%s%s' "$left" $(( room - buddy_w + 2 )) '' "$C" "$buddy" "$BC" "$reaction_part" "$NC"
+}
+
+# Keeps the name in its column of the panel's last row, with the sub-status on its left.
+inline_name_row() {
+    read_single_substatus || return 0
+    local pad=$(( COLS - ART_W - SUBSTATUS_LEFT_W ))
+    [ "$pad" -ge 2 ] || return 0
+    printf '%s%*s%s' "$SUBSTATUS_LEFT" "$pad" '' "${ALL_COLORS[$(( ART_COUNT - 1 ))]}${ALL_LINES[$(( ART_COUNT - 1 ))]}${NC}"
+}
+
+if [ "$SUBSTATUS_INLINE" -eq 1 ]; then
+    if [ "$TIER" = "minimal" ]; then
+        INLINE_ROW=$(inline_substatus_row)
+    else
+        INLINE_ROW=$(inline_name_row)
+    fi
+    if [ -n "$INLINE_ROW" ]; then
+        OUTPUT_LINES[$(( ${#OUTPUT_LINES[@]} - 1 ))]="$INLINE_ROW"
+        SUBSTATUS_PRINTED=1
+    fi
+fi
+
+# cmd+click on the name opens coding-buddy://toggle, which the URL handler from
+# scripts/macos/install-click-toggle.sh routes to toggle-expanded.sh.
+if [ "$CLICK_TO_EXPAND" -eq 1 ]; then
+    _name_link=$'\033]8;;coding-buddy://toggle\033\\'"${NAME_WITH_LEVEL}"$'\033]8;;\033\\'
+    for _i in "${!OUTPUT_LINES[@]}"; do
+        _row="${OUTPUT_LINES[$_i]}"
+        case "$_row" in
+            *"$NAME_WITH_LEVEL"*)
+                OUTPUT_LINES[$_i]="${_row%%"$NAME_WITH_LEVEL"*}${_name_link}${_row#*"$NAME_WITH_LEVEL"}" ;;
+        esac
+    done
+fi
+
+render_output() {
+    for line in "${OUTPUT_LINES[@]}"; do
+        statusline_output_line "$line"
+    done
+
+    # Append the last cached sub-status result below the buddy panel and refresh
+    # it asynchronously when stale. The statusline itself never waits on it.
+    append_substatus
+}
+
+if [ -n "$RENDER_CACHE" ]; then
+    RENDERED=$(render_output)
+    printf '%s\n' "$RENDERED"
+    printf '%s\n%s\n' "$RENDER_KEY" "$RENDERED" > "$RENDER_CACHE.tmp.$$" && mv "$RENDER_CACHE.tmp.$$" "$RENDER_CACHE"
+else
+    render_output
+fi
 
 exit 0

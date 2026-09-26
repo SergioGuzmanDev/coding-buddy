@@ -60,6 +60,10 @@ export function readJsonFile<T>(path: string): T | null {
   }
 }
 
+export function cannedReactionsEnabled(stateDir: string): boolean {
+  return readJsonFile<{ cannedReactions?: unknown }>(join(stateDir, "config.json"))?.cannedReactions !== false;
+}
+
 export function nonNegativeInteger(value: unknown, fallback: number): number {
   if (Number.isInteger(value) && Number(value) >= 0) return Number(value);
   if (typeof value === "string" && /^[0-9]+$/.test(value)) return Number(value);

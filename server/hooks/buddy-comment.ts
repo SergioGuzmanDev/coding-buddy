@@ -2,14 +2,12 @@
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { join } from "path";
-import { reactionPool } from "./reaction-data.ts";
 import {
   defaultSpawnDetached,
   fileExists,
   isOnCooldown,
   nonNegativeInteger,
   parseHookInput,
-  pickRandom,
   readJsonFile,
   readStdin,
   resolveHookSessionId,
@@ -27,11 +25,6 @@ interface Events {
   [key: string]: unknown;
 }
 
-interface BuddyStatus {
-  species?: unknown;
-  [key: string]: unknown;
-}
-
 interface ReactionFile {
   source?: string;
   timestamp?: number;
@@ -46,7 +39,7 @@ const BUDDY_COMMENT_PATTERN = /<!--\s*buddy:\s*([\s\S]*?)\s*-->/g;
  */
 // "tool" is returned when a buddy_react reaction was adopted rather than
 // written by this hook; it mirrors server/state.ts's ReactionSource.
-export type ReactionSource = "tool" | "comment" | "fallback" | "none";
+export type ReactionSource = "tool" | "comment" | "gemini" | "gemini-error" | "fallback" | "none";
 
 export interface BuddyCommentResult {
   comment?: string;
@@ -71,26 +64,6 @@ export function extractBuddyComment(message: string): string {
  * the comment / pool branch.
  */
 const FUTURE_TIMESTAMP_TOLERANCE_MS = 60_000;
-
-function pickTurnFallback(
-  species: string,
-  runtime: HookRuntime,
-): string | undefined {
-  // The hook context has no stat-modifier inputs; pick from the canned
-  // pool directly rather than calling server/reactions.ts `getReaction`,
-  // which is reserved for the MCP server's tool-call path. This mirrors
-  // the file-type-react / mood-react / react hook convention.
-  const pool = reactionPool(species, "turn");
-  if (pool.length === 0) return undefined;
-  return pickRandom(pool, runtime);
-}
-
-function readSpeciesFromStatus(stateDir: string): string {
-  const status = readJsonFile<BuddyStatus>(join(stateDir, "status.json"));
-  return typeof status?.species === "string" && status.species.length > 0
-    ? status.species
-    : "blob";
-}
 
 /** Atomic write — tmp + rename. */
 function atomicWriteJson(path: string, value: unknown): void {
@@ -264,26 +237,8 @@ export function handleBuddyComment(
     return { source: "none", updated: false };
   }
 
-  // ─── Pick a reaction: legacy comment → canned pool → nothing ────────────
-  const commentFromMessage = extractBuddyComment(assistantMessage);
-  let comment: string | undefined;
-  let source: ReactionSource;
-
-  if (commentFromMessage) {
-    comment = commentFromMessage;
-    source = "comment";
-  } else {
-    const species = readSpeciesFromStatus(stateDir);
-    const fallback = pickTurnFallback(species, runtime);
-    if (fallback) {
-      comment = fallback;
-      source = "fallback";
-    } else {
-      atomicWriteTimestamp(stopMarkerFile, now);
-      return { source: "none", updated: false };
-    }
-  }
-
+  const comment = extractBuddyComment(assistantMessage);
+  const userMessage = stringField(input, "last_user_message");
   mkdirSync(stateDir, { recursive: true });
 
   // Bookkeeping fires only when a reaction is actually written (main).
@@ -293,22 +248,19 @@ export function handleBuddyComment(
   atomicWriteJson(eventsFile, events);
 
   atomicWriteTimestamp(cooldownFile, now);
-  atomicWriteJson(reactionPath, {
-    reaction: comment,
-    timestamp: now,
-    reason: "turn",
-    source,
-  });
 
   const spawnDetached = runtime.spawnDetached ?? defaultSpawnDetached(runtime);
+  if (comment) {
+    atomicWriteJson(reactionPath, { reaction: comment, timestamp: now, reason: "turn", source: "comment" });
+  } else {
+    // Gemini takes seconds, so it writes the bubble from its own process instead of holding up the turn.
+    spawnDetached("server/gemini-react.ts", [assistantMessage, userMessage, stringField(input, "transcript_path")]);
+  }
   spawnDetached("server/award-xp.ts", ["turn"]);
-  spawnDetached("server/consolidate.ts", [
-    assistantMessage,
-    stringField(input, "last_user_message"),
-  ]);
+  spawnDetached("server/consolidate.ts", [assistantMessage, userMessage]);
   atomicWriteTimestamp(stopMarkerFile, now);
 
-  return { comment, source, updated: true };
+  return comment ? { comment, source: "comment", updated: true } : { source: "gemini", updated: false };
 }
 
 if (import.meta.main) {

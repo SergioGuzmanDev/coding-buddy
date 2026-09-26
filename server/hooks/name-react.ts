@@ -7,6 +7,7 @@ import {
   NAME_REACTION_POOLS,
 } from "./reaction-data.ts";
 import {
+  cannedReactionsEnabled,
   fileExists,
   parseHookInput,
   pickRandom,
@@ -59,7 +60,7 @@ export function hasNameMention(prompt: string, name: string): boolean {
 export function handleNameReact(rawInput: string, runtime: HookRuntime = {}): NameReactResult {
   const stateDir = resolveHookStateDir(runtime);
   const statusFile = join(stateDir, "status.json");
-  if (!fileExists(statusFile)) return { updated: false };
+  if (!fileExists(statusFile) || !cannedReactionsEnabled(stateDir)) return { updated: false };
 
   const input = parseHookInput(rawInput);
   if (!input) return { updated: false };

@@ -40,7 +40,7 @@ append_substatus() {
     if mkdir "$sweep_lock" 2>/dev/null; then
         (
             trap 'rmdir "$sweep_lock" 2>/dev/null' EXIT
-            find "$state_dir" -type f -name ".substatus.$sid.*" -mmin +60 -exec rm -f {} + 2>/dev/null
+            find "$state_dir" -maxdepth 1 -type f -name ".substatus.$sid.*" -mmin +60 -exec rm -f {} + 2>/dev/null
         ) >/dev/null 2>&1 &
     fi
 
@@ -65,7 +65,7 @@ append_substatus() {
             printf '%s\n' "$line"
         fi
     }
-    if [ -f "$cache_file" ]; then
+    if [ -f "$cache_file" ] && [ "${SUBSTATUS_PRINTED:-0}" -ne 1 ]; then
         while IFS= read -r line || [ -n "$line" ]; do
             _substatus_print_line "$line"
         done < "$cache_file"

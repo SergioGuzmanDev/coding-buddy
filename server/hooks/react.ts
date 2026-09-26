@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { reactionPool } from "./reaction-data.ts";
 import {
+  cannedReactionsEnabled,
   defaultSpawnDetached,
   fileExists,
   hookClock,
@@ -384,10 +385,13 @@ export function handleReact(rawInput: string, runtime: HookRuntime = {}): ReactR
 
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, `.last_reaction.${sid}`), String(clock.nowSeconds));
-  writeFileSync(
-    join(stateDir, `reaction.${sid}.json`),
-    JSON.stringify({ reaction, timestamp: clock.nowSeconds * 1000, reason, source: "fallback" }),
-  );
+  const canned = cannedReactionsEnabled(stateDir);
+  if (canned) {
+    writeFileSync(
+      join(stateDir, `reaction.${sid}.json`),
+      JSON.stringify({ reaction, timestamp: clock.nowSeconds * 1000, reason, source: "fallback" }),
+    );
+  }
 
   const xpEvent = updateEvents(stateDir, reason);
   const spawnDetached = runtime.spawnDetached ?? defaultSpawnDetached(runtime);
@@ -400,7 +404,7 @@ export function handleReact(rawInput: string, runtime: HookRuntime = {}): ReactR
   };
   if (moodTrigger[reason]) spawnDetached("server/shift-mood.ts", [moodTrigger[reason]]);
 
-  return { reaction, reason, updated: true };
+  return canned ? { reaction, reason, updated: true } : { reason, updated: false };
 }
 
 if (import.meta.main) {

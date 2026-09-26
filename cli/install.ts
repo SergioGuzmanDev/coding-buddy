@@ -20,7 +20,7 @@ import {
   claudeUserConfigPath,
   toUnixPath,
 } from "../server/path.ts";
-import { loadCompanion, saveCompanion, resolveUserId, writeStatusState } from "../server/state.ts";
+import { buddyStatusLineEntry, loadCompanion, saveCompanion, resolveUserId, writeStatusState } from "../server/state.ts";
 import { generateFallbackName } from "../core/reactions.ts"
 import { copyRuntimeApp, stableRuntimePaths } from "./runtime-app.ts";
 
@@ -163,12 +163,7 @@ function installSkill() {
 function installStatusLine(settings: Record<string, any>, appDir: string) {
   const statusScript = stableRuntimePaths(appDir).statusline;
 
-  settings.statusLine = {
-    type: "command",
-    command: toUnixPath(statusScript),
-    padding: 1,
-    refreshInterval: 1,  // 1 second — drives the buddy animation
-  };
+  settings.statusLine = buddyStatusLineEntry(statusScript);
 
   ok("Status line configured (with animation refresh)");
 }

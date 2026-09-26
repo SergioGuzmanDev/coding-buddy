@@ -65,6 +65,10 @@ Based on `$ARGUMENTS`:
 | `rainbow`                | Call `buddy_style` with no args (show current rainbow)                                       |
 | `rainbow <#hex> ...`     | Call `buddy_style` with rainbow=[...hex colors] to set shiny gradient                        |
 | `rainbow reset`          | Call `buddy_style` with rainbow=[] to restore default ROYGBIV                                |
+| `color`                  | Call `buddy_color` with no args (show current)                                               |
+| `color <#hex\|reset>`    | Call `buddy_color` with color arg                                                            |
+| `model`                  | Call `buddy_model` with no args (show current)                                               |
+| `model <name\|reset>`    | Call `buddy_model` with model arg                                                            |
 | `statusline`             | Call `buddy_statusline` with no args (show current)                                          |
 | `statusline on`          | Call `buddy_statusline` with enabled=true                                                    |
 | `statusline off`         | Call `buddy_statusline` with enabled=false                                                   |
@@ -85,8 +89,6 @@ The MCP tools return pre-formatted ASCII art with ANSI colors, box-drawing chara
 - Strip ANSI escape codes
 
 **Just output the raw text content from the tool result. Nothing else.** The ASCII art IS the response.
-
-If the user mentions the buddy's name in normal conversation, call `buddy_react` with reason "turn". Do NOT echo or quote the tool result — the reaction reaches the user only via the statusline speech bubble.
 
 ## Uninstall Orchestration
 

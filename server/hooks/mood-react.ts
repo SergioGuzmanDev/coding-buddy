@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { moodReactionPool } from "./reaction-data.ts";
 import {
+  cannedReactionsEnabled,
   fileExists,
   isOnCooldown,
   nonNegativeInteger,
@@ -87,14 +88,17 @@ export function handleMoodReact(rawInput: string, runtime: HookRuntime = {}): Mo
 
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(stateDir, `.last_mood.${sid}`), String(Math.floor(now / 1000)));
-  writeFileSync(
-    join(stateDir, `reaction.${sid}.json`),
-    JSON.stringify({ reaction, timestamp: Math.floor(now / 1000) * 1000, reason: mood, source: "fallback" }),
-  );
-  if (parsedStatus) writeFileSync(statusFile, JSON.stringify({ ...status, reaction }, null, 2));
+  const canned = cannedReactionsEnabled(stateDir);
+  if (canned) {
+    writeFileSync(
+      join(stateDir, `reaction.${sid}.json`),
+      JSON.stringify({ reaction, timestamp: Math.floor(now / 1000) * 1000, reason: mood, source: "fallback" }),
+    );
+    if (parsedStatus) writeFileSync(statusFile, JSON.stringify({ ...status, reaction }, null, 2));
+  }
   incrementEvent(stateDir, `mood_${mood}`);
 
-  return { mood, reaction, updated: true };
+  return canned ? { mood, reaction, updated: true } : { mood, updated: false };
 }
 
 if (import.meta.main) {

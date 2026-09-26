@@ -302,7 +302,7 @@ function migrateIfNeeded(): void {
  *   fallback  — Stop hook generated it from the canned pool
  *   none      — unknown / legacy file without a source field
  */
-export type ReactionSource = "tool" | "comment" | "fallback" | "none";
+export type ReactionSource = "tool" | "comment" | "gemini" | "gemini-error" | "fallback" | "none";
 
 export interface ReactionState {
   reaction: string;
@@ -362,6 +362,8 @@ export interface BuddyConfig {
   bubbleStyle: "classic" | "round";
   bubblePosition: "top" | "left";
   showRarity: boolean;
+  color?: string;
+  bubbleColor?: string;
   statusLineEnabled: boolean;
   statuslineDensity: "auto" | "full" | "compact" | "minimal";
   statuslineWidthAdjust: number;
@@ -370,12 +372,18 @@ export interface BuddyConfig {
   useCombinedStatus: boolean;
   subStatusCommand?: string;
   subStatusRefreshSeconds: number;
+  subStatusInline: boolean;
+  expanded: boolean;
+  clickToExpand: boolean;
+  animate: boolean | "focused";
   rainbowColors?: string[];
   theme: "dark" | "light" | "auto";
   moodEnabled: boolean;
   memoryEnabled: boolean;
   suggestionsEnabled: boolean;
   suggestionCooldown: number;
+  geminiModel: string;
+  cannedReactions: boolean;
 }
 const DEFAULT_CONFIG: BuddyConfig = {
   commentCooldown: 30,
@@ -393,11 +401,17 @@ const DEFAULT_CONFIG: BuddyConfig = {
   bubbleMargin: 8,
   useCombinedStatus: false,
   subStatusRefreshSeconds: 15,
+  subStatusInline: false,
+  expanded: false,
+  clickToExpand: false,
+  animate: true,
   theme: "auto",
   moodEnabled: true,
   memoryEnabled: true,
   suggestionsEnabled: true,
   suggestionCooldown: 180,
+  geminiModel: "gemini-3.8-flash-high",
+  cannedReactions: true,
 };
 
 export function normalizeConfig(data: unknown): BuddyConfig {
@@ -410,6 +424,9 @@ export function normalizeConfig(data: unknown): BuddyConfig {
   }
   if (!Number.isInteger(config.subStatusRefreshSeconds) || config.subStatusRefreshSeconds <= 0) {
     config.subStatusRefreshSeconds = DEFAULT_CONFIG.subStatusRefreshSeconds;
+  }
+  if (typeof config.geminiModel !== "string" || config.geminiModel.trim() === "") {
+    config.geminiModel = DEFAULT_CONFIG.geminiModel;
   }
   if (!Number.isInteger(config.reactionTTL) || config.reactionTTL < 0) {
     config.reactionTTL = DEFAULT_CONFIG.reactionTTL;
@@ -438,6 +455,13 @@ export function saveConfig(config: Partial<BuddyConfig>): BuddyConfig {
   const merged = { ...current, ...config };
   writeFileSync(CONFIG_FILE(), JSON.stringify(merged, null, 2));
   return merged;
+}
+
+/** Saves a #RRGGBB status line color, or drops it for "reset"; returns null for anything else. */
+export function saveColor(value: string): BuddyConfig | null {
+  if (value === "reset") return saveConfig({ color: undefined });
+  const hex = value.match(/^#?([0-9A-Fa-f]{6})$/)?.[1];
+  return hex ? saveConfig({ color: `#${hex.toUpperCase()}` }) : null;
 }
 
 // ─── Status line state (compact JSON for the shell script) ───────────────────
@@ -575,18 +599,17 @@ export const CLAUDE_SETTINGS_PATH = claudeSettingsPath();
  * Write settings.statusLine pointing to the given buddy-status script.
  * Atomic via tmp + rename. Returns false if settings.json is unreachable.
  */
+export function buddyStatusLineEntry(statusScript: string) {
+  return { type: "command", command: toUnixPath(statusScript), refreshInterval: 1 };
+}
+
 export function setBuddyStatusLine(
   statusScript: string,
   settingsPath: string = CLAUDE_SETTINGS_PATH,
 ): boolean {
   try {
     const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    settings.statusLine = {
-      type: "command",
-      command: toUnixPath(statusScript),
-      padding: 1,
-      refreshInterval: 1,
-    };
+    settings.statusLine = buddyStatusLineEntry(statusScript);
     const tmp = settingsPath + ".tmp";
     writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n");
     renameSync(tmp, settingsPath);

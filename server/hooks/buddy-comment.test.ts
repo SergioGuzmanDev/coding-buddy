@@ -120,33 +120,35 @@ describe("buddy comment Stop hook", () => {
     expect(readFileSync(join(stateDir, "reaction.session1.json"), "utf8")).toBe(originalFile);
   });
 
-  test("falls back to a canned pool line when no comment is emitted", () => {
+  test("hands the bubble to the detached Gemini script when no comment is emitted", () => {
     const stateDir = makeStateDir();
     dirs.push(stateDir);
     writeFileSync(join(stateDir, "status.json"), JSON.stringify({ species: "blob" }));
     writeFileSync(join(stateDir, "events.json"), "{}");
 
+    const spawned: Array<{ script: string; args: string[] }> = [];
     const result = handleBuddyComment(
       JSON.stringify({
         last_assistant_message: "a perfectly ordinary reply with no comment",
         last_user_message: "go",
+        transcript_path: "/tmp/session.jsonl",
       }),
       {
         now: () => 1_700_000_000_000,
         random: () => 0,
         sessionId: "session1",
-        spawnDetached: () => {},
+        spawnDetached: (script, args) => spawned.push({ script, args }),
         stateDir,
       },
     );
 
-    expect(result.source).toBe("fallback");
-    expect(result.updated).toBe(true);
-    expect(result.comment).toBeString();
-    const onDisk = JSON.parse(readFileSync(join(stateDir, "reaction.session1.json"), "utf8"));
-    expect(onDisk.source).toBe("fallback");
-    expect(onDisk.reaction).toBe(result.comment);
-    expect(onDisk.reason).toBe("turn");
+    expect(result).toEqual({ source: "gemini", updated: false });
+    expect(spawned[0]).toEqual({
+      script: "server/gemini-react.ts",
+      args: ["a perfectly ordinary reply with no comment", "go", "/tmp/session.jsonl"],
+    });
+    expect(existsSync(join(stateDir, "reaction.session1.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(stateDir, "events.json"), "utf8")).turns).toBe(1);
   });
 
   // F1: a tool reaction from a LONG turn (>5min) survives the stop hook.
@@ -186,8 +188,8 @@ describe("buddy comment Stop hook", () => {
   });
 
   // F2: a future-dated tool timestamp is treated as untrusted (clock-skewed
-  // garbage) and the pool writes over it.
-  test("F2 future-clock: 5-min future tool timestamp is clobbered", () => {
+  // garbage) and Gemini is asked for a new line.
+  test("F2 future-clock: 5-min future tool timestamp is not adopted", () => {
     const stateDir = makeStateDir();
     dirs.push(stateDir);
     writeFileSync(join(stateDir, "status.json"), JSON.stringify({ species: "blob" }));
@@ -217,11 +219,7 @@ describe("buddy comment Stop hook", () => {
       },
     );
 
-    expect(result.source).toBe("fallback");
-    expect(result.updated).toBe(true);
-    const onDisk = JSON.parse(readFileSync(join(stateDir, "reaction.session1.json"), "utf8"));
-    expect(onDisk.source).toBe("fallback");
-    expect(onDisk.timestamp).toBe(now);
+    expect(result).toEqual({ source: "gemini", updated: false });
   });
 
   // F5: 10 short turns inside a 30s cooldown window produce ONE

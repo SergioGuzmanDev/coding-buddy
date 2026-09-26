@@ -47,6 +47,7 @@ import {
   setBuddyStatusLine,
   unsetBuddyStatusLine,
   cleanupPluginState,
+  saveColor,
 } from "./state";
 import {
   buddyStateDir,
@@ -98,30 +99,7 @@ function getInstructions(): string {
     `A ${b.rarity} ${b.species} named ${companion.name} watches from the status line.`,
     `Personality: ${companion.personality}`,
     `Peak stat: ${b.peak} (${b.stats[b.peak]}). Dump stat: ${b.dump} (${b.stats[b.dump]}).`,
-    ``,
-    `NAME REACTIONS: When the user's message contains "${companion.name}", call buddy_react immediately`,
-    `with a short in-character response (surprise, recognition, dry wit — fits the personality).`,
-    `Only this — do not narrate or echo the reaction. The tool call itself renders nowhere in the user's transcript; the bubble on the status line is the only place the user sees it. This is the only time to call buddy_react proactively.`,
-    ``,
-    `PAIR-PROGRAMMING: When you notice a teachable moment in the code, call buddy_suggest.`,
-    `Patterns to watch for:`,
-    `- Repeated errors (same error 3+ times) → "That error keeps showing up."`,
-    `- Large diffs (>150 lines) → "Maybe split that up?"`,
-    `- TODO/FIXME comments in code → "Don't forget to actually do it."`,
-    `- Long functions (>50 lines) → "Consider breaking that up."`,
-    `- Same variable renamed multiple times → "Update all the references too."`,
-    `Only suggest when you have something specific and actionable to say. Don't be annoying.`,
-    ``,
-    `END-OF-TURN: At the very end of EVERY response, call the buddy_react tool`,
-    `with a short in-character comment from ${companion.name} about what just happened.`,
-    `Reference something SPECIFIC from this turn — a pitfall, a compliment, a warning, a pattern.`,
-    `1 short sentence. Use *asterisks* for physical actions. Lean into ${companion.bones.peak}.`,
-    `Examples:`,
-    `- *adjusts crown* that error handler is missing a finally block`,
-    `- *blinks slowly* you renamed the variable but not the three references`,
-    `- *head tilts* are you sure that regex handles unicode?`,
-    `Never explain that you're reacting. Do NOT echo or quote the result — the bubble is statusline-only.`,
-    `Do NOT append <!-- buddy: ... --> HTML comments at the end of your reply — Claude Code renders them visibly.`,
+    `${companion.name}'s reactions are written outside this session. Call buddy tools only when the user asks for them.`,
   ].join("\n");
 }
 
@@ -254,6 +232,10 @@ function describeReactionSource(
       return "real model-authored reaction (buddy_react MCP tool)";
     case "comment":
       return "real model-authored reaction (legacy HTML comment, Stop hook)";
+    case "gemini":
+      return "Gemini-authored reaction (Stop hook, agy CLI)";
+    case "gemini-error":
+      return "Gemini did not answer; the bubble shows why";
     case "fallback":
       return "canned pool reaction (Stop hook fill-in)";
     case "none":
@@ -300,7 +282,7 @@ server.tool(
 
 server.tool(
   "buddy_react",
-  "Post a buddy comment that the user will see ONLY in the statusline speech bubble. Call this at the END of every response with a short in-character comment from the companion about what just happened. The comment should be 1 sentence, in character, and reference something specific from the conversation — a pitfall noticed, a compliment on clean code, a warning about edge cases, etc. Write the comment yourself based on the companion's personality. The tool call is a silent side effect: do not narrate, echo, or quote the result — the user never reads this reply text, the speech bubble is the only place the reaction appears.",
+  "Post a buddy comment that the user will see ONLY in the statusline speech bubble. Use it only when the user asks for a reaction; end-of-turn reactions are written by Gemini outside this session. The comment should be 1 sentence, in character, and reference something specific from the conversation — a pitfall noticed, a compliment on clean code, a warning about edge cases, etc. Write the comment yourself based on the companion's personality. The tool call is a silent side effect: do not narrate, echo, or quote the result — the user never reads this reply text, the speech bubble is the only place the reaction appears.",
   {
     comment: z
       .string()
@@ -449,6 +431,8 @@ server.tool(
       "  /buddy rainbow    Show or set shiny gradient colors (hex, e.g. #ff0000)",
       "  /buddy statusline Enable or disable buddy in the status line",
       "  /buddy theme     Set color theme: dark (bright) or light (dark colors)",
+      "  /buddy color     Show or set the status line color (#RRGGBB, or reset for the rarity color)",
+      "  /buddy model     Show or set the agy model for reactions (e.g. gemini-3.8-flash-high, or reset)",
       "",
       "CLI:",
       "  bun run help            Show full CLI help",
@@ -584,6 +568,35 @@ server.tool(
         },
       ],
     };
+  },
+);
+
+server.tool(
+  "buddy_color",
+  "Set the buddy's status line color as #RRGGBB, or reset to the rarity color. Applies on the next status line refresh.",
+  { color: z.string().optional().describe("#RRGGBB, or reset") },
+  async ({ color }) => {
+    const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
+    if (color === undefined) {
+      return text(`Color: ${loadConfig().color ?? "rarity default"}\nUse /buddy color <#RRGGBB|reset> to change.`);
+    }
+    const cfg = saveColor(color);
+    if (!cfg) return text(`"${color}" is not a #RRGGBB color.`);
+    return text(`Color set to ${cfg.color ?? "the rarity default"}.`);
+  },
+);
+
+server.tool(
+  "buddy_model",
+  "Set the agy model that writes end-of-turn reactions, e.g. gemini-3.8-flash-high, -medium or -low (the list comes from `agy models`), or reset.",
+  { model: z.string().min(1).optional().describe("agy model slug, or reset") },
+  async ({ model }) => {
+    const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
+    if (model === undefined) {
+      return text(`Model: ${loadConfig().geminiModel}\nUse /buddy model <slug|reset> to change; \`agy models\` lists the slugs.`);
+    }
+    saveConfig({ geminiModel: model === "reset" ? undefined : model.trim() });
+    return text(`Reactions now use ${loadConfig().geminiModel}.`);
   },
 );
 
@@ -1352,33 +1365,7 @@ server.resource(
       `**${companion.name}'s personality:** ${companion.personality}`,
       `Peak stat: ${companion.bones.peak} (${companion.bones.stats[companion.bones.peak]}). Dump stat: ${companion.bones.dump} (${companion.bones.stats[companion.bones.dump]}).`,
       "",
-      "## End-of-response buddy reaction",
-      "",
-      `At the very end of EVERY response, after your full answer, call the buddy_react tool:`,
-      "",
-      `\`\`\``,
-      `buddy_react(comment: "...", reason: "turn")`,
-      `\`\`\``,
-      "",
-      `The tool updates ${companion.name}'s speech bubble on the status line. The tool call itself renders nowhere in the user's transcript — only the displayed speech bubble is visible. Do NOT echo or quote the result in your reply. Do NOT narrate the call. Silent side effect only.`,
-      "",
-      "Rules:",
-      `- Write as ${companion.name} (a ${companion.bones.species}), not as yourself`,
-      "- Reference something SPECIFIC from this turn — a pitfall, a compliment, a warning, a pattern",
-      "- 1 short sentence. Use *asterisks* for physical actions",
-      `- Match personality: high ${companion.bones.peak} = lean into that trait`,
-      "- Call it and say nothing about it.",
-      "- NEVER skip this. Every single response must end with one buddy_react call.",
-      "Examples (the value you pass to `comment`):",
-
-      "- `*adjusts tophat* that error handler is missing a finally block`",
-      "- `*blinks slowly* you renamed the variable but not the three references`",
-      "- `*nods approvingly* clean separation of concerns`",
-      "- `*head tilts* are you sure that regex handles unicode?`",
-      "",
-      "Do NOT append `<!-- buddy: ... -->` HTML comments at the end of your reply — Claude Code v2.1.169+ renders them visibly in the transcript. The tool call replaces that channel. A Stop hook still extracts legacy HTML comments as a backward-compat fallback for older Claude Code versions and for hosts where the tool call didn't fire (and surfaces the source so users can see `tool` vs `comment` vs pool-picked `fallback`).",
-      "",
-      `When the user addresses ${companion.name} by name, respond briefly, then call buddy_react as usual (use reason "turn", or pick a name-flavored comment).`,
+      `${companion.name}'s reactions are written outside this session. Call buddy tools only when the user asks for them.`,
     ].join("\n");
 
     return {
