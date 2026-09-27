@@ -8,7 +8,7 @@
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOVES, truncateDisplayWidth } from "./art.ts";
+import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOVES, statusMoveChoices, truncateDisplayWidth } from "./art.ts";
 import { SPECIES_ART as CORE_SPECIES_ART } from "../core/art-data.ts";
 import { SPECIES, EYES, type BuddyBones } from "../core/engine.ts"
 function readCodepointRanges(path: string): number[] {
@@ -198,6 +198,18 @@ describe("getStatusFrames", () => {
     expect(celebrateSequence!.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
     expect(celebrateSequence!.some((i) => frames[i].includes("\\( ^  ^ )/"))).toBe(true);
     expect(celebrateSequence!.some((i) => minimalFrames[i] === "\\(^^)/")).toBe(true);
+  });
+
+  test("each move Gemini can pick has its own sequence, drawn from that move's frames", () => {
+    const { frames, moveSequences } = getStatusFrames(octopus);
+    const choices = statusMoveChoices("octopus");
+
+    expect(Object.keys(moveSequences!).sort()).toEqual(choices.map((m) => m.name).sort());
+    expect(new Set(choices.map((m) => m.name)).size).toBe(choices.length);
+    for (const [name, mark] of Object.entries(marks)) {
+      expect(moveSequences![name].some((i) => frames[i].includes(mark)), name).toBe(true);
+    }
+    expect(moveSequences!.celebrate.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
   });
 
   test("sweat adds a drop left of the eyes and a ';' to the face without resizing any frame", () => {

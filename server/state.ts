@@ -66,7 +66,7 @@ const STATUS_FILE = () => join(stateDir(), "status.json");
 //
 // Must match the bash equivalent in scripts/paths.sh.
 
-function sessionId(): string {
+export function sessionId(): string {
   const ccSid = process.env.CLAUDE_CODE_SESSION_ID;
   if (ccSid && ccSid.length > 0) return ccSid.slice(0, 8);
   const pane = process.env.TMUX_PANE;
@@ -310,6 +310,8 @@ export interface ReactionState {
   reason: string;
   /** Provenance — see ReactionSource. Defaults to "none" on legacy files. */
   source?: ReactionSource;
+  /** A move from statusMoveChoices that the status line acts out while the reaction is new. */
+  move?: string;
 }
 
 export function loadReaction(): ReactionState | null {
@@ -331,9 +333,10 @@ export function saveReaction(
   reaction: string,
   reason: string,
   source: ReactionSource = "fallback",
+  move?: string,
 ): void {
   mkdirSync(stateDir(), { recursive: true });
-  const state: ReactionState = { reaction, timestamp: Date.now(), reason, source };
+  const state: ReactionState = { reaction, timestamp: Date.now(), reason, source, ...(move ? { move } : {}) };
   // Atomic via tmp + rename — torn reads on the reaction file would
   // make the Stop hook's freshness check see an absent file, pinning
   // a stale tool reaction into the bubble forever.
@@ -489,6 +492,7 @@ export interface StatusState {
   tiredSequence?: number[];
   idleSequence?: number[];
   celebrateSequence?: number[];
+  moveSequences?: Record<string, number[]>;
   sweat?: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
   level: number;
   xp: number;
@@ -533,7 +537,7 @@ export function writeStatusState(
   const safeEye = resolveEyeGlyph(companion.bones.eye);
   const artResult = getStatusFrames(companion.bones) as Partial<ReturnType<typeof Art.getStatusFrames>> &
     Pick<StatusState, "frames" | "frameSequence">;
-  const { frames, frameSequence, tiredSequence, idleSequence, celebrateSequence, sweat } = artResult;
+  const { frames, frameSequence, tiredSequence, idleSequence, celebrateSequence, moveSequences, sweat } = artResult;
   const compactFrames =
     artResult.compactFrames && artResult.compactFrames.length > 0
       ? artResult.compactFrames
@@ -579,6 +583,7 @@ export function writeStatusState(
     tiredSequence,
     idleSequence,
     celebrateSequence,
+    moveSequences,
     sweat,
     level: xpLevel,
     xp: xpTotal,

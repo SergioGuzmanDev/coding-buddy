@@ -386,7 +386,8 @@ if [ -n "$ACHIEVEMENT" ] && [ "$ACHIEVEMENT" != "null" ]; then
 fi
 
 REACTION=""
-[ -f "$REACTION_FILE" ] && read_fields REACTION TS < <(jq -j '(.reaction // ""), (.timestamp // 0) | tostring, "\u0000"' "$REACTION_FILE" 2>/dev/null)
+REACTION_MOVE=""
+[ -f "$REACTION_FILE" ] && read_fields REACTION TS REACTION_MOVE < <(jq -j '(.reaction // ""), (.timestamp // 0), (.move // "") | tostring, "\u0000"' "$REACTION_FILE" 2>/dev/null)
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
     FRESH=0
     if [ "$REACTION_TTL" -eq 0 ]; then
@@ -414,13 +415,21 @@ NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
 SWEAT_AT_CONTEXT_PCT=40
 TIRED_AT_5H_PCT=50
 ASLEEP_AFTER_IDLE_SECONDS=300
+REACTION_MOVE_SECONDS=30
 SWEAT=false
 [ "$CONTEXT_PCT" -ge "$SWEAT_AT_CONTEXT_PCT" ] 2>/dev/null && SWEAT=true
+TIRED=false
+[ "$USAGE_5H_PCT" -ge "$TIRED_AT_5H_PCT" ] 2>/dev/null && TIRED=true
+# gemini-react reads this at the end of a turn so its reaction matches how the buddy is drawn.
+_signals="sweat=$SWEAT tired=$TIRED"
+_old_signals=""
+[ -f "$BUDDY_STATE_DIR/.signals.$SID" ] && IFS= read -r _old_signals < "$BUDDY_STATE_DIR/.signals.$SID"
+[ "$_signals" = "$_old_signals" ] || printf '%s\n' "$_signals" > "$BUDDY_STATE_DIR/.signals.$SID"
 # The transcript grows with every message and tool call, so its age is how long the conversation has been quiet.
 MOVE=pool
 if [ -f "$TRANSCRIPT" ] && [ $(( NOW - $(_substatus_mtime "$TRANSCRIPT") )) -ge "$ASLEEP_AFTER_IDLE_SECONDS" ]; then
     MOVE=idle
-elif [ "$USAGE_5H_PCT" -ge "$TIRED_AT_5H_PCT" ] 2>/dev/null; then
+elif [ "$TIRED" = true ]; then
     MOVE=tired
 fi
 # A frozen status line would keep the celebration's first frame, so only an animated one celebrates.
@@ -428,14 +437,23 @@ SINCE_TURN_END=-1
 _turn_end=""
 [ "$ANIMATE" -eq 1 ] && [ -f "$BUDDY_STATE_DIR/.last_stop_hook.$SID" ] && IFS= read -r _turn_end < "$BUDDY_STATE_DIR/.last_stop_hook.$SID"
 case "$_turn_end" in ''|*[!0-9]*) ;; *) SINCE_TURN_END=$(( NOW - _turn_end )) ;; esac
+SINCE_REACTION=-1
+case "$TS" in
+    ''|*[!0-9]*) ;;
+    *) [ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE" ] && [ $(( NOW - TS / 1000 )) -lt "$REACTION_MOVE_SECONDS" ] \
+        && SINCE_REACTION=$(( NOW - TS / 1000 )) ;;
+esac
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
-    --argjson sweat "$SWEAT" --argjson since_turn_end "$SINCE_TURN_END" '
+    --argjson sweat "$SWEAT" --argjson since_turn_end "$SINCE_TURN_END" \
+    --arg reaction_move "$REACTION_MOVE" --argjson since_reaction "$SINCE_REACTION" '
     def at($sequence): $sequence[$now % ($sequence | length)];
     (if $sweat then (.sweat // {}) else {} end) as $sweat_set
     | (if $tier == "compact" then ($sweat_set.compactFrames // .compactFrames? // .frames)
      elif $tier == "minimal" then ($sweat_set.minimalFrames // .minimalFrames? // .frames)
      else ($sweat_set.frames // .frames) end) as $set
     | (if $since_turn_end >= 0 and $since_turn_end < (.celebrateSequence | length) then .celebrateSequence[$since_turn_end]
+       elif $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0
+           then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
        elif $move == "idle" and (.idleSequence | length) > 0 then at(.idleSequence)
        elif $move == "tired" and (.tiredSequence | length) > 0 then at(.tiredSequence)
        else at(.frameSequence) end) as $idx

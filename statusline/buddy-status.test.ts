@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -699,6 +700,42 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, input)).toContain("art-asleep");
       utimesSync(transcript, now - 299, now - 299);
       expect(render(configDir, input)).toContain("art-tired");
+    });
+
+    test("acts out the move Gemini picked for 30 seconds after its reaction, if the move exists and it animates", () => {
+      const { configDir, stateDir } = fixture({ moveSequences: { coffee: [3] } });
+      // Expired reactions are swept by the real clock, so this test runs on it.
+      const clock = Math.floor(Date.now() / 1000);
+      const at = { BUDDY_FAKE_NOW: String(clock) };
+      const reacted = (secondsAgo: number, move: string) => writeFileSync(join(stateDir, "reaction.default.json"),
+        JSON.stringify({ reaction: "*sorbe*", timestamp: (clock - secondsAgo) * 1000, move }));
+
+      reacted(29, "coffee");
+      expect(render(configDir, {}, at)).toContain("art-cheer");
+      reacted(30, "coffee");
+      expect(render(configDir, {}, at)).toContain("art-rest");
+      reacted(5, "moonwalk");
+      expect(render(configDir, {}, at)).toContain("art-rest");
+
+      reacted(5, "coffee");
+      writeFileSync(join(stateDir, "config.json"), JSON.stringify({ statuslineDensity: "full", animate: "focused" }));
+      writeFileSync(join(stateDir, "focused-session"), "AAA");
+      expect(render(configDir, {}, { ...at, ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
+    });
+
+    test("records whether it is sweating or tired for gemini-react, writing only when that changes", () => {
+      const { configDir, stateDir } = fixture({});
+      const signals = join(stateDir, ".signals.default");
+
+      render(configDir, { context_window: { used_percentage: 45 } });
+      expect(readFileSync(signals, "utf8")).toBe("sweat=true tired=false\n");
+
+      utimesSync(signals, now - 100, now - 100);
+      render(configDir, { context_window: { used_percentage: 46 } });
+      expect(Math.round(statSync(signals).mtimeMs / 1000)).toBe(now - 100);
+
+      render(configDir, { context_window: { used_percentage: 10 }, rate_limits: { five_hour: { used_percentage: 60 } } });
+      expect(readFileSync(signals, "utf8")).toBe("sweat=false tired=true\n");
     });
 
     test("celebrates in the ticks right after a turn ends, only where it animates", () => {

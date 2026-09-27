@@ -124,6 +124,36 @@ describe("gemini-react", () => {
     expect(prompt.split("LATEST-ASK")).toHaveLength(2);
   });
 
+  test("stores the move Gemini acts out with its reaction, only when it is one of the octopus's moves", () => {
+    saveCompanion({ ...companion, bones: { ...companion.bones, species: "octopus" } });
+    const answer = (response: string) => {
+      writeFileSync(join(root, "out.json"), JSON.stringify({ response }));
+      reactWithGemini("reply", "ask", { bin: fakeGemini(`cat "${root}/out.json"`) });
+      return JSON.parse(readFileSync(join(stateDir, "reaction.sessionA.json"), "utf8"));
+    };
+
+    expect(answer("coffee\n*sorbe su café* bien visto")).toMatchObject({ reaction: "*sorbe su café* bien visto", move: "coffee" });
+    expect(readFileSync(join(root, "args.log"), "utf8")).toContain("coffee (sips a coffee)");
+
+    const invented = answer("moonwalk\n*hace moonwalk* genial");
+    expect(invented.reaction).toBe("*hace moonwalk* genial");
+    expect(invented.move).toBeUndefined();
+  });
+
+  test("tells Gemini the buddy is sweating or tired when the status line draws it that way", () => {
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
+    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const prompt = (signals: string) => {
+      writeFileSync(join(stateDir, ".signals.sessionA"), signals);
+      reactWithGemini("reply", "ask", { bin });
+      return readFileSync(join(root, "args.log"), "utf8");
+    };
+
+    expect(prompt("sweat=true tired=true\n")).toContain("You are sweating");
+    expect(prompt("sweat=true tired=true\n")).toContain("You are tired");
+    expect(prompt("sweat=false tired=false\n")).not.toMatch(/You are (sweating|tired)/);
+  });
+
   test("says it is sleeping when the agy CLI is missing", () => {
     reactWithGemini("reply", "ask", { bin: join(root, "no-such-agy") });
 

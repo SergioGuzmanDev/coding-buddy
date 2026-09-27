@@ -10,8 +10,9 @@ import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSy
 import { homedir } from "os";
 import { join } from "path";
 import type { Companion } from "../core/engine.ts";
+import { statusMoveChoices } from "./art.ts";
 import { buddyStateDir } from "./path.ts";
-import { loadCompanion, loadConfig, saveReaction } from "./state.ts";
+import { loadCompanion, loadConfig, saveReaction, sessionId } from "./state.ts";
 
 const MAX_REACTION_CHARS = 150;
 const FAILURE_BACKOFF_MS = 10 * 60_000;
@@ -84,22 +85,48 @@ export function earlierConversation(transcriptPath: string, latest: string[]): s
   return turns.join("\n\n");
 }
 
+/** How the status line draws the buddy right now, as last written there to `.signals.<sid>`. */
+export interface BuddyLook {
+  sweating: boolean;
+  tired: boolean;
+}
+
+export function readBuddyLook(stateDir: string): BuddyLook {
+  let signals = "";
+  try {
+    signals = readFileSync(join(stateDir, `.signals.${sessionId()}`), "utf8");
+  } catch {
+    // No status line render yet in this session.
+  }
+  return { sweating: /\bsweat=true\b/.test(signals), tired: /\btired=true\b/.test(signals) };
+}
+
 export function buildPrompt(
   companion: Companion,
   assistantMessage: string,
   userMessage: string,
   earlier = "",
+  look: BuddyLook = { sweating: false, tired: false },
 ): string {
   const b = companion.bones;
+  const moves = statusMoveChoices(b.species);
   return [
     `You are ${companion.name}, a ${b.rarity} ${b.species} living in a developer's terminal status line, watching them work with an AI coding assistant.`,
     `Personality: ${companion.personality}`,
     `Strongest trait: ${b.peak}. Weakest trait: ${b.dump}.`,
+    ...(look.sweating ? ["You are sweating: the conversation's context window is filling up."] : []),
+    ...(look.tired ? ["You are tired: most of the developer's 5-hour usage limit is spent."] : []),
     "",
     "Write ONE in-character reaction to the latest exchange below, under 120 characters.",
     "Point at something specific from it: a pitfall, a win, a risk, a pattern. Use the earlier conversation only to understand it.",
     "Use *asterisks* for physical actions. Write in the developer's language.",
-    "Output only the reaction: no quotes, no preamble.",
+    ...(moves.length
+      ? [
+          `While your reaction shows, you are drawn acting out one move: ${moves.map((m) => `${m.name} (${m.does})`).join(", ")}.`,
+          "Answer in two lines: first the name of the move, exactly as written, then the reaction. Any *action* in the reaction must be that move.",
+          "No quotes, no preamble.",
+        ]
+      : ["Output only the reaction: no quotes, no preamble."]),
     "",
     ...(earlier ? ["<earlier_conversation>", earlier, "</earlier_conversation>", ""] : []),
     "<developer>",
@@ -118,7 +145,18 @@ export function cleanReaction(raw: string): string | undefined {
   return text.length > MAX_REACTION_CHARS ? `${text.slice(0, MAX_REACTION_CHARS - 1).trimEnd()}…` : text;
 }
 
-type GeminiAnswer = ({ reaction: string } | { error: string }) & { conversationId?: string };
+/**
+ * Splits Gemini's "move, then reaction" answer. A first line that is not one of the moves is dropped
+ * rather than drawn, so an invented move never reaches the status line.
+ */
+export function parseAnswer(raw: string, moveNames: string[]): { reaction?: string; move?: string } {
+  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (!moveNames.length || lines.length < 2) return { reaction: cleanReaction(raw) };
+  const named = lines[0].toLowerCase().replace(/^move:\s*/, "").replace(/[^a-z]/g, "");
+  return { reaction: cleanReaction(lines.slice(1).join("\n")), move: moveNames.includes(named) ? named : undefined };
+}
+
+type GeminiAnswer = ({ reaction: string; move?: string } | { error: string }) & { conversationId?: string };
 
 function shorten(text: string): string {
   return text.length > MAX_ERROR_CHARS ? `${text.slice(0, MAX_ERROR_CHARS - 1).trimEnd()}…` : text;
@@ -133,7 +171,7 @@ function stderrReason(stderr: string, status: number | null): string {
   return shorten(firstSentence(last) || `exit ${status}`);
 }
 
-function askGemini(bin: string, model: string, prompt: string, cwd: string): GeminiAnswer {
+function askGemini(bin: string, model: string, prompt: string, cwd: string, moveNames: string[]): GeminiAnswer {
   const args = ["-p", prompt, "--output-format", "json", "--model", model, "--mode", "plan", "--disable-slash-commands"];
   // Print mode must never sit waiting on a stdin that nobody writes to.
   const result = spawnSync(bin, args, { cwd, encoding: "utf8", input: "", timeout: GEMINI_TIMEOUT_MS });
@@ -150,8 +188,8 @@ function askGemini(bin: string, model: string, prompt: string, cwd: string): Gem
     return { error: shorten(firstSentence(reply.error.trim().split("\n")[0] ?? "")), conversationId };
   }
   if (result.status !== 0) return { error: stderrReason(result.stderr ?? "", result.status), conversationId };
-  const reaction = typeof reply.response === "string" ? cleanReaction(reply.response) : undefined;
-  return reaction ? { reaction, conversationId } : { error: "empty reply", conversationId };
+  const { reaction, move } = typeof reply.response === "string" ? parseAnswer(reply.response, moveNames) : {};
+  return reaction ? { reaction, move, conversationId } : { error: "empty reply", conversationId };
 }
 
 /** agy keeps every print-mode run as a conversation; the buddy never resumes one, so each is deleted. */
@@ -197,13 +235,14 @@ export function reactWithGemini(
     const earlier = runtime.transcriptPath
       ? earlierConversation(runtime.transcriptPath, [assistantMessage, userMessage])
       : "";
-    const prompt = buildPrompt(companion, assistantMessage, userMessage, earlier);
-    const answer = askGemini(runtime.bin ?? "agy", loadConfig().geminiModel, prompt, cwd);
+    const prompt = buildPrompt(companion, assistantMessage, userMessage, earlier, readBuddyLook(stateDir));
+    const moveNames = statusMoveChoices(companion.bones.species).map((m) => m.name);
+    const answer = askGemini(runtime.bin ?? "agy", loadConfig().geminiModel, prompt, cwd, moveNames);
     if (answer.conversationId) {
       forgetConversation(answer.conversationId, runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli"));
     }
     if ("reaction" in answer) {
-      saveReaction(answer.reaction, "turn", "gemini");
+      saveReaction(answer.reaction, "turn", "gemini", answer.move);
       return answer.reaction;
     }
     error = answer.error;

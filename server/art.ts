@@ -264,9 +264,12 @@ export const STATUS_FRAME_SEQUENCE: readonly number[] = [
 // Offsets into a smoke action's frames: a drag, the smoke, a second drag.
 const SMOKE_SEQUENCE = [0, 0, 1, 1, 2, 3, 3, 0, 1, 1, 2, 3, 3, 0];
 
-type StatusMove = { frames: string[][]; faces: string[]; sequence: number[]; tiredWeight?: number };
+// name and does are what Gemini picks from to act out its reaction; see server/gemini-react.ts.
+type StatusMove = { name: string; does: string; frames: string[][]; faces: string[]; sequence: number[]; tiredWeight?: number };
 
 const OCTOPUS_SLEEP: StatusMove = {
+  name: "sleep",
+  does: "dozes off",
   frames: [
     ["            ", "   .----.   ", "  ( -  - )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
     ["            ", "   .----.   ", "  ( -  - ) z", "  (______)  ", "  /\\/\\/\\/\\  "],
@@ -285,6 +288,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
   octopus: {
     pool: [
       {
+        name: "cigarette",
+        does: "smokes a cigarette",
         frames: [
           ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.   ", "  ( -  - )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
@@ -295,6 +300,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: SMOKE_SEQUENCE,
       },
       {
+        name: "pipe",
+        does: "smokes a pipe",
         frames: [
           ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.   ", "  ( -  - )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
@@ -305,6 +312,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: SMOKE_SEQUENCE,
       },
       {
+        name: "wave",
+        does: "waves a tentacle",
         frames: [
           ["            ", "   .----.   \\", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.   /", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
@@ -314,6 +323,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
       },
       {
         // The panel cannot grow, so the jump crouches one row down first and the resting height reads as air.
+        name: "jump",
+        does: "jumps",
         frames: [
           ["            ", "            ", "   .----.   ", "  ( {E}  {E} )  ", " (/\\/\\/\\/\\) "],
           ["            ", "   .----.   ", "  ( ^  ^ )  ", "  (______)  ", "   ' '' '   "],
@@ -322,6 +333,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0],
       },
       {
+        name: "coffee",
+        does: "sips a coffee",
         frames: [
           ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)c[_]", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)c[_]", "  /\\/\\/\\/\\  "],
@@ -332,6 +345,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
       },
       OCTOPUS_SLEEP,
       {
+        name: "look",
+        does: "looks around",
         frames: [
           ["            ", "   .----.   ", "  ({E}  {E}  )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.   ", "  (  {E}  {E})  ", "  (______)  ", "  /\\/\\/\\/\\  "],
@@ -340,6 +355,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0, 1, 1],
       },
       {
+        name: "dance",
+        does: "dances",
         frames: [
           ["            ", "  .----.    ", " ( {E}  {E} )   ", " (______)   ", " /\\/\\/\\/\\   "],
           ["            ", "    .----.  ", "   ( {E}  {E} ) ", "   (______) ", "   \\/\\/\\/\\/ "],
@@ -348,6 +365,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
       },
       {
+        name: "yawn",
+        does: "yawns",
         frames: [
           ["            ", "   .----.   ", "  ( -  - )  ", "  (__o___)  ", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.   ", "  ( >  < )  ", "  (__O___)  ", "  \\/\\/\\/\\/  "],
@@ -359,6 +378,8 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
     ],
     idle: OCTOPUS_SLEEP,
     celebrate: {
+      name: "celebrate",
+      does: "celebrates with raised arms",
       frames: [
         ["            ", "\\  .----.  /", " \\( ^  ^ )/ ", "  (______)  ", "  /\\/\\/\\/\\  "],
         ["            ", "*  .----.  *", " -( ^  ^ )- ", "  (______)  ", "  /\\/\\/\\/\\  "],
@@ -368,6 +389,12 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
     },
   },
 };
+
+/** The moves Gemini may act out with a reaction: the pool and the celebration. */
+export function statusMoveChoices(species: Species): StatusMove[] {
+  const moves = STATUS_MOVES[species];
+  return moves ? [...moves.pool, moves.celebrate] : [];
+}
 
 // A sweat drop just left of the eye row, and the ";" of "(^^;)" in the one-row face.
 function withSweat(frame: string): string {
@@ -392,6 +419,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   tiredSequence?: number[];
   idleSequence?: number[];
   celebrateSequence?: number[];
+  moveSequences?: Record<string, number[]>;
   sweat: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
 } {
   const resolveArt = (raw: string[], eyeGlyph: string): string => {
@@ -434,6 +462,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   let tiredSequence: number[] | undefined;
   let idleSequence: number[] | undefined;
   let celebrateSequence: number[] | undefined;
+  let moveSequences: Record<string, number[]> | undefined;
   const moves = STATUS_MOVES[bones.species];
   if (moves) {
     const firsts = new Map<StatusMove, number>();
@@ -465,6 +494,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
     tiredSequence = drawSlots((move) => move.tiredWeight ?? 1);
     idleSequence = played(moves.idle);
     celebrateSequence = played(moves.celebrate);
+    moveSequences = Object.fromEntries(statusMoveChoices(bones.species).map((move) => [move.name, played(move)]));
   }
   const sweatFrames = frames.map(withSweat);
   return {
@@ -475,6 +505,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
     tiredSequence,
     idleSequence,
     celebrateSequence,
+    moveSequences,
     sweat: {
       frames: sweatFrames,
       compactFrames: deriveCompactFrames(sweatFrames),
