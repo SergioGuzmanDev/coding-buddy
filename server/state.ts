@@ -486,6 +486,10 @@ export interface StatusState {
   compactFrames: string[];
   minimalFrames: string[];
   frameSequence: number[];
+  tiredSequence?: number[];
+  idleSequence?: number[];
+  celebrateSequence?: number[];
+  sweat?: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
   level: number;
   xp: number;
   mood: string;
@@ -527,13 +531,9 @@ export function writeStatusState(
   const { getStatusFrames } =
     require("./art.ts") as typeof Art;
   const safeEye = resolveEyeGlyph(companion.bones.eye);
-  const artResult = getStatusFrames(companion.bones) as {
-    frames: string[];
-    frameSequence: number[];
-    compactFrames?: string[];
-    minimalFrames?: string[];
-  };
-  const { frames, frameSequence } = artResult;
+  const artResult = getStatusFrames(companion.bones) as Partial<ReturnType<typeof Art.getStatusFrames>> &
+    Pick<StatusState, "frames" | "frameSequence">;
+  const { frames, frameSequence, tiredSequence, idleSequence, celebrateSequence, sweat } = artResult;
   const compactFrames =
     artResult.compactFrames && artResult.compactFrames.length > 0
       ? artResult.compactFrames
@@ -576,6 +576,10 @@ export function writeStatusState(
     compactFrames,
     minimalFrames,
     frameSequence,
+    tiredSequence,
+    idleSequence,
+    celebrateSequence,
+    sweat,
     level: xpLevel,
     xp: xpTotal,
     mood: moodStr,
@@ -595,14 +599,16 @@ export function writeStatusState(
 }
 
 export const CLAUDE_SETTINGS_PATH = claudeSettingsPath();
+
+// Every tick runs the whole renderer in each session; the octopus actions still move when sampled every 2s.
+export function buddyStatusLineEntry(statusScript: string) {
+  return { type: "command", command: toUnixPath(statusScript), refreshInterval: 2 };
+}
+
 /**
  * Write settings.statusLine pointing to the given buddy-status script.
  * Atomic via tmp + rename. Returns false if settings.json is unreachable.
  */
-export function buddyStatusLineEntry(statusScript: string) {
-  return { type: "command", command: toUnixPath(statusScript), refreshInterval: 1 };
-}
-
 export function setBuddyStatusLine(
   statusScript: string,
   settingsPath: string = CLAUDE_SETTINGS_PATH,

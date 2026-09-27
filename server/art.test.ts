@@ -8,7 +8,7 @@
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, truncateDisplayWidth } from "./art.ts";
+import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOVES, truncateDisplayWidth } from "./art.ts";
 import { SPECIES_ART as CORE_SPECIES_ART } from "../core/art-data.ts";
 import { SPECIES, EYES, type BuddyBones } from "../core/engine.ts"
 function readCodepointRanges(path: string): number[] {
@@ -128,15 +128,21 @@ describe("getStatusFrames", () => {
     }
   });
 
-  test("every 30 seconds the octopus does a random action from its pool, at the resting frame's size", () => {
-    const octopus = bones({ species: "octopus", eye: "@" });
-    const marks = { cigarette: "(______)===*", pipe: "(______)___u", wave: "(______)__/" };
-    const acting = (frame: string) => Object.values(marks).some((mark) => frame.includes(mark));
-    let calls = 0;
-    const { frames, minimalFrames, frameSequence } = getStatusFrames(octopus, () => [0, 0.4, 0.8][calls++ % 3]);
+  const octopus = bones({ species: "octopus", eye: "@" });
+  const pool = STATUS_MOVES.octopus!.pool;
+  // Evenly spread draws, so every move of the pool is picked in turn.
+  const everyMove = () => { let calls = 0; return () => ((calls++ % pool.length) + 0.5) / pool.length; };
+  const marks = {
+    cigarette: "(______)===*", pipe: "(______)___u", wave: "(______)__/", jump: "' '' '", coffee: "c[_]",
+    sleep: "( -  - ) z", look: "(@  @  )", dance: "   (______)", yawn: "(__O___)",
+  };
+  const acting = (frame: string) => Object.values(marks).some((mark) => frame.includes(mark));
+
+  test("every 30 seconds the octopus does a random move from its pool, at the resting frame's size", () => {
+    const { frames, minimalFrames, frameSequence } = getStatusFrames(octopus, everyMove());
     const resting = frames[0].split("\n");
 
-    for (const frame of frames.filter(acting)) {
+    for (const frame of frames) {
       expect(frame.split("\n")).toHaveLength(resting.length);
       expect(frame.split("\n")[0].trim()).toBe("");
     }
@@ -146,11 +152,66 @@ describe("getStatusFrames", () => {
       expect(frameSequence.slice(slot * 30, slot * 30 + 30).some((i) => acting(frames[i]))).toBe(true);
     }
     for (const mark of Object.values(marks)) expect(frameSequence.some((i) => frames[i].includes(mark))).toBe(true);
-    for (const face of [" *===~(", " u___~(", ")~/"]) expect(frameSequence.some((i) => minimalFrames[i].includes(face))).toBe(true);
+    for (const face of [" *===~(", " u___~(", ")~/", "_(@@)_", "c[_]", "~(--)~z", "~(@@ )~", "/(@@)/", "~(>O<)~"]) {
+      expect(frameSequence.some((i) => minimalFrames[i].includes(face))).toBe(true);
+    }
     expect(frameSequence.filter((i) => acting(frames[i])).length).toBeLessThanOrEqual(frameSequence.length / 2);
 
     const cigarettesOnly = getStatusFrames(octopus, () => 0);
-    expect(cigarettesOnly.frameSequence.some((i) => cigarettesOnly.frames[i].includes("___u") || cigarettesOnly.frames[i].includes("__/"))).toBe(false);
+    expect(cigarettesOnly.frameSequence.some((i) => Object.values(marks).slice(1).some((m) => cigarettesOnly.frames[i].includes(m)))).toBe(false);
+  });
+
+  test("every octopus move still moves when the status line samples every other second", () => {
+    const moving = (frames: string[], sequence: number[], label: string) => {
+      const resting = new Set(STATUS_FRAME_SEQUENCE.map((i) => frames[i]));
+      for (const parity of [0, 1]) {
+        const shown = new Set(sequence.filter((_, tick) => tick % 2 === parity).map((i) => frames[i]));
+        expect([...shown].filter((frame) => !resting.has(frame)).length, `${label} at parity ${parity}`).toBeGreaterThanOrEqual(2);
+      }
+    };
+    for (let move = 0; move < pool.length; move++) {
+      const { frames, frameSequence } = getStatusFrames(octopus, () => (move + 0.5) / pool.length);
+      moving(frames, frameSequence, `pool move ${move}`);
+    }
+    const { frames, idleSequence, celebrateSequence } = getStatusFrames(octopus);
+    moving(frames, idleSequence!, "idle");
+    moving(frames, celebrateSequence!, "celebration");
+  });
+
+  test("a tired octopus sleeps or yawns in at least half of its moves, a rested one far less", () => {
+    let calls = 0;
+    const evenly = () => ((calls++ % 40) + 0.5) / 40;
+    const { frames, frameSequence, tiredSequence } = getStatusFrames(octopus, evenly);
+    const drowsyShare = (sequence: number[]) => {
+      const slots = Array.from({ length: sequence.length / 30 }, (_, slot) => sequence.slice(slot * 30, slot * 30 + 30));
+      return slots.filter((slot) => slot.some((i) => frames[i].includes(marks.sleep) || frames[i].includes(marks.yawn))).length / slots.length;
+    };
+
+    expect(drowsyShare(tiredSequence!)).toBeGreaterThanOrEqual(0.5);
+    expect(drowsyShare(frameSequence)).toBeLessThan(0.3);
+  });
+
+  test("the idle loop sleeps and a finished turn is celebrated with raised arms", () => {
+    const { frames, minimalFrames, idleSequence, celebrateSequence } = getStatusFrames(octopus);
+
+    expect(idleSequence!.every((i) => frames[i].includes("( -  - )"))).toBe(true);
+    expect(celebrateSequence!.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
+    expect(celebrateSequence!.some((i) => frames[i].includes("\\( ^  ^ )/"))).toBe(true);
+    expect(celebrateSequence!.some((i) => minimalFrames[i] === "\\(^^)/")).toBe(true);
+  });
+
+  test("sweat adds a drop left of the eyes and a ';' to the face without resizing any frame", () => {
+    const { frames, minimalFrames, sweat } = getStatusFrames(octopus);
+
+    expect(sweat.frames).toHaveLength(frames.length);
+    sweat.frames.forEach((frame, i) => {
+      expect(frame.split("\n").map(displayWidth)).toEqual(frames[i].split("\n").map(displayWidth));
+      expect(frame.split("\n")[2]).toMatch(/'\S/);
+    });
+    expect(sweat.frames[0].split("\n")[2]).toContain("'( @  @ )");
+    expect(sweat.minimalFrames[0]).toBe(minimalFrames[0].replace(")", ";)"));
+    expect(sweat.minimalFrames[0]).toContain("(@@;)");
+    expect(sweat.compactFrames[0]).toContain("'( @  @ )");
   });
 
   test("the octopus's bubble floats beside its head so the status line can drop the top row", () => {

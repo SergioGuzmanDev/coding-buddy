@@ -264,41 +264,118 @@ export const STATUS_FRAME_SEQUENCE: readonly number[] = [
 // Offsets into a smoke action's frames: a drag, the smoke, a second drag.
 const SMOKE_SEQUENCE = [0, 0, 1, 1, 2, 3, 3, 0, 1, 1, 2, 3, 3, 0];
 
-// Octopus-only actions, one drawn at random every 30 seconds: a cigarette, a pipe or a wave. The top
-// row stays blank and every row keeps the resting width, so the panel never changes size mid-action.
-// In the one-row faces the extras sit around the face; the name stays pinned to the right edge.
-const STATUS_ACTIONS: Partial<Record<Species, Array<{ frames: string[][]; faces: string[]; sequence: number[] }>>> = {
-  octopus: [
-    {
-      frames: [
-        ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
-        ["            ", "   .----.   ", "  ( -  - )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
-        ["            ", "   .----.   ", "  ( {E}  {E} )   ~", "  (______)===*", "  /\\/\\/\\/\\  "],
-        ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)===*", "  \\/\\/\\/\\/  "],
-      ],
-      faces: [" *===~({E}{E})~", " *===~(--)~", "°*===~({E}{E})~", "~*===~({E}{E})~"],
-      sequence: SMOKE_SEQUENCE,
-    },
-    {
-      frames: [
-        ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
-        ["            ", "   .----.   ", "  ( -  - )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
-        ["            ", "   .----.   ", "  ( {E}  {E} )   ~", "  (______)___u", "  /\\/\\/\\/\\  "],
-        ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)___u", "  \\/\\/\\/\\/  "],
-      ],
-      faces: [" u___~({E}{E})~", " u___~(--)~", "°u___~({E}{E})~", "~u___~({E}{E})~"],
-      sequence: SMOKE_SEQUENCE,
-    },
-    {
-      frames: [
-        ["            ", "   .----.   \\", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
-        ["            ", "   .----.   /", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
-      ],
-      faces: ["~({E}{E})~\\", "~({E}{E})~/"],
-      sequence: [0, 1, 0, 1, 0, 1, 0, 1],
-    },
+type StatusMove = { frames: string[][]; faces: string[]; sequence: number[]; tiredWeight?: number };
+
+const OCTOPUS_SLEEP: StatusMove = {
+  frames: [
+    ["            ", "   .----.   ", "  ( -  - )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
+    ["            ", "   .----.   ", "  ( -  - ) z", "  (______)  ", "  /\\/\\/\\/\\  "],
+    ["            ", "   .----.  Z", "  ( -  - ) z", "  (______)  ", "  \\/\\/\\/\\/  "],
   ],
+  faces: ["~(--)~", "~(--)~z", "~(--)~zZ"],
+  sequence: [0, 0, 1, 1, 2, 2, 1, 1, 2, 2, 1, 1],
+  tiredWeight: 4,
 };
+
+// Octopus-only moves. One pool move is drawn at random every 30 seconds; a tired session draws from the
+// same pool by tiredWeight. The top row stays blank and every row keeps the resting width, so the panel
+// never changes size mid-move, and each pose lasts two ticks so a status line refreshed every 2s still
+// shows it. In the one-row faces the extras sit around the face; the name stays pinned to the right.
+export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: StatusMove; celebrate: StatusMove }>> = {
+  octopus: {
+    pool: [
+      {
+        frames: [
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)===*", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )   ~", "  (______)===*", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)===*", "  \\/\\/\\/\\/  "],
+        ],
+        faces: [" *===~({E}{E})~", " *===~(--)~", "°*===~({E}{E})~", "~*===~({E}{E})~"],
+        sequence: SMOKE_SEQUENCE,
+      },
+      {
+        frames: [
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)___u", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )   ~", "  (______)___u", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)___u", "  \\/\\/\\/\\/  "],
+        ],
+        faces: [" u___~({E}{E})~", " u___~(--)~", "°u___~({E}{E})~", "~u___~({E}{E})~"],
+        sequence: SMOKE_SEQUENCE,
+      },
+      {
+        frames: [
+          ["            ", "   .----.   \\", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   /", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
+        ],
+        faces: ["~({E}{E})~\\", "~({E}{E})~/"],
+        sequence: [0, 0, 1, 1, 0, 0, 1, 1],
+      },
+      {
+        // The panel cannot grow, so the jump crouches one row down first and the resting height reads as air.
+        frames: [
+          ["            ", "            ", "   .----.   ", "  ( {E}  {E} )  ", " (/\\/\\/\\/\\) "],
+          ["            ", "   .----.   ", "  ( ^  ^ )  ", "  (______)  ", "   ' '' '   "],
+        ],
+        faces: ["_({E}{E})_", "~(^^)~"],
+        sequence: [0, 0, 1, 1, 0, 0],
+      },
+      {
+        frames: [
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)c[_]", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    ~", "  ( {E}  {E} )  ~", "  (______)c[_]", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  - )c[_]", "  (______)  ", "  /\\/\\/\\/\\  "],
+        ],
+        faces: ["~({E}{E})~c[_]", "~({E}{E})~c[_]~", "~(--)~c[_]"],
+        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 2, 2, 0, 0],
+      },
+      OCTOPUS_SLEEP,
+      {
+        frames: [
+          ["            ", "   .----.   ", "  ({E}  {E}  )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  (  {E}  {E})  ", "  (______)  ", "  /\\/\\/\\/\\  "],
+        ],
+        faces: ["~({E}{E} )~", "~( {E}{E})~"],
+        sequence: [0, 0, 1, 1, 0, 0, 1, 1],
+      },
+      {
+        frames: [
+          ["            ", "  .----.    ", " ( {E}  {E} )   ", " (______)   ", " /\\/\\/\\/\\   "],
+          ["            ", "    .----.  ", "   ( {E}  {E} ) ", "   (______) ", "   \\/\\/\\/\\/ "],
+        ],
+        faces: ["/({E}{E})/", "\\({E}{E})\\"],
+        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+      },
+      {
+        frames: [
+          ["            ", "   .----.   ", "  ( -  - )  ", "  (__o___)  ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( >  < )  ", "  (__O___)  ", "  \\/\\/\\/\\/  "],
+        ],
+        faces: ["~(-o-)~", "~(>O<)~"],
+        sequence: [0, 0, 1, 1, 1, 1, 0, 0],
+        tiredWeight: 4,
+      },
+    ],
+    idle: OCTOPUS_SLEEP,
+    celebrate: {
+      frames: [
+        ["            ", "\\  .----.  /", " \\( ^  ^ )/ ", "  (______)  ", "  /\\/\\/\\/\\  "],
+        ["            ", "*  .----.  *", " -( ^  ^ )- ", "  (______)  ", "  /\\/\\/\\/\\  "],
+      ],
+      faces: ["\\(^^)/", "*-(^^)-*"],
+      sequence: [0, 0, 1, 1, 0, 0, 1, 1],
+    },
+  },
+};
+
+// A sweat drop just left of the eye row, and the ";" of "(^^;)" in the one-row face.
+function withSweat(frame: string): string {
+  const lines = frame.split("\n");
+  const at = lines[2]?.search(/\S/) ?? -1;
+  if (at > 0) lines[2] = `${lines[2].slice(0, at - 1)}'${lines[2].slice(at)}`;
+  return lines.join("\n");
+}
 
 // Every 30 seconds: one normal cycle, then an action padded with resting ticks to another cycle.
 const ACTION_SLOT_TICKS = STATUS_FRAME_SEQUENCE.length;
@@ -312,6 +389,10 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   compactFrames: string[];
   minimalFrames: string[];
   frameSequence: number[];
+  tiredSequence?: number[];
+  idleSequence?: number[];
+  celebrateSequence?: number[];
+  sweat: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
 } {
   const resolveArt = (raw: string[], eyeGlyph: string): string => {
     const art = raw.map((line) => line.replace(/\{E\}/g, eyeGlyph));
@@ -350,33 +431,55 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   ];
   const minimalFrames = Array.from({ length: frames.length }, () => renderFace(bones.species, eye));
   let frameSequence = [...STATUS_FRAME_SEQUENCE];
-  const actions = STATUS_ACTIONS[bones.species];
-  if (actions) {
-    const firsts = actions.map((action) => {
-      const first = frames.length;
-      frames.push(...action.frames.map((raw) => resolveArt(raw, eye)));
-      minimalFrames.push(...action.faces.map((face) => face.replace(/\{E\}/g, eye)));
-      return first;
-    });
+  let tiredSequence: number[] | undefined;
+  let idleSequence: number[] | undefined;
+  let celebrateSequence: number[] | undefined;
+  const moves = STATUS_MOVES[bones.species];
+  if (moves) {
+    const firsts = new Map<StatusMove, number>();
+    for (const move of [...moves.pool, moves.idle, moves.celebrate]) {
+      if (firsts.has(move)) continue;
+      firsts.set(move, frames.length);
+      frames.push(...move.frames.map((raw) => resolveArt(raw, eye)));
+      minimalFrames.push(...move.faces.map((face) => face.replace(/\{E\}/g, eye)));
+    }
     // The cigarette and pipe reach past the resting art; padding every frame to the widest keeps the buddy
     // from sliding sideways whenever the animation switches frames.
     const width = Math.max(...frames.flatMap((f) => f.split("\n").map(displayWidth)));
     for (let i = 0; i < frames.length; i++) {
       frames[i] = frames[i].split("\n").map((l) => l + " ".repeat(width - displayWidth(l))).join("\n");
     }
-    // The status line only replays frameSequence, so each slot's action is drawn here, in a 20-minute
+    const played = (move: StatusMove) => move.sequence.map((offset) => firsts.get(move)! + offset);
+    // The status line only replays these sequences, so each slot's move is drawn here, in a 20-minute
     // loop that is drawn again whenever status.json is rewritten.
-    frameSequence = Array.from({ length: ACTION_PATTERN_SLOTS }, () => {
-      const pick = Math.floor(random() * actions.length);
-      const played = actions[pick].sequence.map((offset) => firsts[pick] + offset);
-      return [...STATUS_FRAME_SEQUENCE, ...played, ...Array(ACTION_SLOT_TICKS - played.length).fill(0)];
-    }).flat();
+    const drawSlots = (weight: (move: StatusMove) => number) => {
+      const total = moves.pool.reduce((sum, move) => sum + weight(move), 0);
+      return Array.from({ length: ACTION_PATTERN_SLOTS }, () => {
+        let left = random() * total;
+        const move = moves.pool.find((m) => (left -= weight(m)) < 0) ?? moves.pool[moves.pool.length - 1];
+        const moved = played(move);
+        return [...STATUS_FRAME_SEQUENCE, ...moved, ...Array(ACTION_SLOT_TICKS - moved.length).fill(0)];
+      }).flat();
+    };
+    frameSequence = drawSlots(() => 1);
+    tiredSequence = drawSlots((move) => move.tiredWeight ?? 1);
+    idleSequence = played(moves.idle);
+    celebrateSequence = played(moves.celebrate);
   }
+  const sweatFrames = frames.map(withSweat);
   return {
     frames,
     compactFrames: deriveCompactFrames(frames),
     minimalFrames,
     frameSequence,
+    tiredSequence,
+    idleSequence,
+    celebrateSequence,
+    sweat: {
+      frames: sweatFrames,
+      compactFrames: deriveCompactFrames(sweatFrames),
+      minimalFrames: minimalFrames.map((face) => face.replace(")", ";)")),
+    },
   };
 }
 

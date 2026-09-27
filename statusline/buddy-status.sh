@@ -47,40 +47,50 @@ SID="$BUDDY_SID"
 REACTION_FILE="$BUDDY_STATE_DIR/reaction.$SID.json"
 BUDDY_STATUSLINE_INPUT=$(cat)
 
-# Unfocused iTerm2 sessions under animate "focused" reprint their last render while nothing it reads
-# has changed; the 10-second bucket still lets clocks, reaction expiry and the sub-status move.
+# Unfocused iTerm2 sessions under animate "focused" reprint their last render until their reaction or
+# the config changes. Claude Code's input differs on every tick, so it cannot be part of that check.
 RENDER_CACHE=""
-if [ -n "${ITERM_SESSION_ID:-}" ] && grep -q '"animate": *"focused"' "$CONFIG_FILE" 2>/dev/null \
-    && [ "$(cat "$BUDDY_STATE_DIR/focused-session" 2>/dev/null)" != "${ITERM_SESSION_ID#*:}" ]; then
-    RENDER_CACHE="$BUDDY_STATE_DIR/.render.$SID"
-    _read_files=("$STATE" "$CONFIG_FILE" "$REACTION_FILE" "$BUDDY_STATE_DIR/.substatus.$SID")
-    RENDER_KEY=$({
-        printf '%s\n%s\n' "$BUDDY_STATUSLINE_INPUT" "$(( ${BUDDY_FAKE_NOW:-$(date +%s)} / 10 ))"
-        stat -f '%Fm' "${_read_files[@]}" 2>/dev/null || stat -c '%.9Y' "${_read_files[@]}" 2>/dev/null
-    } | cksum)
-    if [ "$(head -n 1 "$RENDER_CACHE" 2>/dev/null)" = "$RENDER_KEY" ]; then
-        tail -n +2 "$RENDER_CACHE"
+if [ -n "${ITERM_SESSION_ID:-}" ] && [ -f "$BUDDY_STATE_DIR/focused-session" ] \
+    && grep -q '"animate": *"focused"' "$CONFIG_FILE" 2>/dev/null; then
+    _render_cache="$BUDDY_STATE_DIR/.render.$SID"
+    if [ "$(cat "$BUDDY_STATE_DIR/focused-session")" = "${ITERM_SESSION_ID#*:}" ]; then
+        # Reprinting a render from before this focus would undo everything shown while focused.
+        [ -f "$_render_cache" ] && rm -f "$_render_cache"
+    elif [ "$_render_cache" -nt "$CONFIG_FILE" ] && [ "$_render_cache" -nt "$REACTION_FILE" ]; then
+        cat "$_render_cache"
         exit 0
+    else
+        RENDER_CACHE="$_render_cache"
     fi
 fi
 
 [ -f "$STATE" ] || exit 0
 
-MUTED=$(jq -r '.muted // false' "$STATE" 2>/dev/null)
-[ "$MUTED" = "true" ] && exit 0
+# Assigns the NUL-terminated values on stdin to the named variables; one jq per file instead of one
+# per field, since every jq start costs more than the rest of a field's work.
+read_fields() {
+    local _field
+    for _field in "$@"; do IFS= read -r -d '' "$_field"; done
+}
 
-NAME=$(jq -r '.name // ""' "$STATE" 2>/dev/null)
-[ -z "$NAME" ] && exit 0
-
-RARITY=$(jq -r '.rarity // "common"' "$STATE" 2>/dev/null)
-STARS=$(jq -r '.stars // ""' "$STATE" 2>/dev/null)
-SHINY=$(jq -r '.shiny // false' "$STATE" 2>/dev/null)
-ACHIEVEMENT=$(jq -r '.achievement // ""' "$STATE" 2>/dev/null)
 # "absent" distinguishes a legacy status.json (no field at all) from an explicit
-# 0, which means "no achievement pending" and must not render.
-ACHIEVEMENT_AT=$(jq -r 'if has("achievementAt") then (.achievementAt // 0) else "absent" end' "$STATE" 2>/dev/null)
-LEVEL=$(jq -r '.level // 1' "$STATE" 2>/dev/null)
-MOOD=$(jq -r '.mood // "focused"' "$STATE" 2>/dev/null)
+# 0, which means "no achievement pending" and must not render. Claude Code's input is read as one
+# array so a malformed field there cannot shift the values after it.
+# The level comes from xp.json because awarding XP rewrites only that file; the copy in status.json
+# is as old as the last buddy tool call. It is read raw so a damaged xp.json cannot blank the buddy.
+_xp_file="$BUDDY_STATE_DIR/xp.json"
+[ -f "$_xp_file" ] || _xp_file=/dev/null
+read_fields MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD \
+    TRANSCRIPT CONTEXT_PCT USAGE_5H_PCT < <(jq -j --arg input "$BUDDY_STATUSLINE_INPUT" --rawfile xp "$_xp_file" '
+    def pct: if type == "number" then floor else 0 end;
+    (.muted // false), (.name // ""), (.rarity // "common"), (.stars // ""), (.shiny // false),
+    (.achievement // ""), (if has("achievementAt") then (.achievementAt // 0) else "absent" end),
+    ((try ($xp | fromjson | .level) catch null) // .level // 1), (.mood // "focused"),
+    (try ($input | fromjson | [(.transcript_path // ""), (.context_window.used_percentage | pct),
+        (.rate_limits.five_hour.used_percentage | pct)]) catch ["", 0, 0])[]
+    | tostring, "\u0000"' "$STATE" 2>/dev/null)
+[ "$MUTED" = "true" ] && exit 0
+[ -z "$NAME" ] && exit 0
 
 # ─── Animation timing ───────────────────────────────────────────────────────
 NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
@@ -89,7 +99,14 @@ NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
 # ─── Rarity color (theme-aware) ─────────────────────────────────────────────
 _THEME="dark"
 if [ -f "$CONFIG_FILE" ]; then
-    _cfg_theme=$(jq -r '.theme // "auto"' "$CONFIG_FILE" 2>/dev/null)
+    # try: a malformed rainbowColors must not blank every other setting read by the same jq.
+    read_fields _cfg_theme _cfg_animate _color _bubble_color _cfg_hide_rarity _custom _cfg_inline _cfg_expanded \
+        _cfg_click _ttl _bw _bm _wa _density < <(jq -j '
+        (.theme // "auto"), (if .animate == null then "true" else (.animate | tostring) end),
+        (.color // ""), (.bubbleColor // ""), (.showRarity == false), (try ((.rainbowColors // []) | @tsv) catch ""),
+        (.subStatusInline // false), (.expanded // false), (.clickToExpand // false), (.reactionTTL // 900),
+        (.bubbleWidth // 44), (.bubbleMargin // 8), (.statuslineWidthAdjust // 0), (.statuslineDensity // "auto")
+        | tostring, "\u0000"' "$CONFIG_FILE" 2>/dev/null)
     [ "$_cfg_theme" = "light" ] && _THEME="light"
 fi
 
@@ -132,7 +149,7 @@ ANIMATE=1
 if [ -f "$CONFIG_FILE" ]; then
     # A clock-driven frame changes every session's status line in the same second; "focused" animates
     # only the iTerm2 session named in focused-session, written by scripts/macos/buddy_focus.py.
-    case "$(jq -r 'if .animate == null then "true" else (.animate | tostring) end' "$CONFIG_FILE" 2>/dev/null)" in
+    case "$_cfg_animate" in
         false) ANIMATE=0 ;;
         focused)
             if [ -n "${ITERM_SESSION_ID:-}" ]; then
@@ -141,13 +158,10 @@ if [ -f "$CONFIG_FILE" ]; then
             fi
             ;;
     esac
-    _color=$(jq -r '.color // ""' "$CONFIG_FILE" 2>/dev/null)
     [[ "$_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && C=$(_hex_to_ansi "$_color")
-    _bubble_color=$(jq -r '.bubbleColor // ""' "$CONFIG_FILE" 2>/dev/null)
     [[ "$_bubble_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && BC=$(_hex_to_ansi "$_bubble_color")
     # "// true" would turn an explicit false into true.
-    [ "$(jq -r '.showRarity == false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && STARS=""
-    _custom=$(jq -r '(.rainbowColors // []) | @tsv' "$CONFIG_FILE" 2>/dev/null)
+    [ "$_cfg_hide_rarity" = "true" ] && STARS=""
     if [ -n "$_custom" ]; then
         RAINBOW=()
         for _hex in $_custom; do
@@ -278,24 +292,19 @@ SUBSTATUS_INLINE=0
 EXPANDED=0
 CLICK_TO_EXPAND=0
 if [ -f "$CONFIG_FILE" ]; then
-    [ "$(jq -r '.subStatusInline // false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && SUBSTATUS_INLINE=1
-    [ "$(jq -r '.expanded // false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && EXPANDED=1
-    [ "$(jq -r '.clickToExpand // false' "$CONFIG_FILE" 2>/dev/null)" = "true" ] && CLICK_TO_EXPAND=1
-    _ttl=$(jq -r '.reactionTTL // 900' "$CONFIG_FILE" 2>/dev/null || echo 900)
+    [ "$_cfg_inline" = "true" ] && SUBSTATUS_INLINE=1
+    [ "$_cfg_expanded" = "true" ] && EXPANDED=1
+    [ "$_cfg_click" = "true" ] && CLICK_TO_EXPAND=1
     case "$_ttl" in ''|*[!0-9]*) ;; *) REACTION_TTL="$_ttl" ;; esac
-    _bw=$(jq -r '.bubbleWidth // 44' "$CONFIG_FILE" 2>/dev/null || echo 44)
     case "$_bw" in ''|*[!0-9]*) ;; *) INNER_W="$_bw" ;; esac
-    _bm=$(jq -r '.bubbleMargin // 8' "$CONFIG_FILE" 2>/dev/null || echo 8)
     case "$_bm" in ''|*[!0-9]*) ;; *) MARGIN="$_bm" ;; esac
-    _wa=$(jq -r '.statuslineWidthAdjust // 0' "$CONFIG_FILE" 2>/dev/null || echo 0)
-    if printf '%s' "$_wa" | grep -Eq '^[+-]?[0-9]+$'; then
+    if [[ "$_wa" =~ ^[+-]?[0-9]+$ ]]; then
         case "$_wa" in
             +*) STATUSLINE_WIDTH_ADJUST=$((10#${_wa#+})) ;;
             -*) STATUSLINE_WIDTH_ADJUST=$((-10#${_wa#-})) ;;
             *)  STATUSLINE_WIDTH_ADJUST=$((10#$_wa)) ;;
         esac
     fi
-    _density=$(jq -r '.statuslineDensity // "auto"' "$CONFIG_FILE" 2>/dev/null || echo "auto")
     case "$_density" in
         auto|full|compact|minimal) DENSITY="$_density" ;;
         *) DENSITY="auto" ;;
@@ -376,13 +385,13 @@ if [ -n "$ACHIEVEMENT" ] && [ "$ACHIEVEMENT" != "null" ]; then
     [ "$ACH_FRESH" -eq 1 ] && BUBBLE=$'\xf0\x9f\x8f\x86'" $ACHIEVEMENT"
 fi
 
-REACTION=$(jq -r '.reaction // ""' "$REACTION_FILE" 2>/dev/null)
+REACTION=""
+[ -f "$REACTION_FILE" ] && read_fields REACTION TS < <(jq -j '(.reaction // ""), (.timestamp // 0) | tostring, "\u0000"' "$REACTION_FILE" 2>/dev/null)
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
     FRESH=0
     if [ "$REACTION_TTL" -eq 0 ]; then
         FRESH=1
     elif [ -f "$REACTION_FILE" ]; then
-        TS=$(jq -r '.timestamp // 0' "$REACTION_FILE" 2>/dev/null || echo 0)
         if [ "$TS" != "0" ]; then
             NOW=$(date +%s)
             AGE=$(( (NOW * 1000 - TS) / 1000 ))
@@ -402,11 +411,34 @@ fi
 
 # ─── Animation: pick current density frame from server-rendered frames ───────
 NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
-FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" '
-    (if $tier == "compact" then (.compactFrames? // .frames)
-     elif $tier == "minimal" then (.minimalFrames? // .frames)
-     else .frames end) as $set
-    | .frameSequence[$now % (.frameSequence | length)] as $idx
+SWEAT_AT_CONTEXT_PCT=40
+TIRED_AT_5H_PCT=50
+ASLEEP_AFTER_IDLE_SECONDS=300
+SWEAT=false
+[ "$CONTEXT_PCT" -ge "$SWEAT_AT_CONTEXT_PCT" ] 2>/dev/null && SWEAT=true
+# The transcript grows with every message and tool call, so its age is how long the conversation has been quiet.
+MOVE=pool
+if [ -f "$TRANSCRIPT" ] && [ $(( NOW - $(_substatus_mtime "$TRANSCRIPT") )) -ge "$ASLEEP_AFTER_IDLE_SECONDS" ]; then
+    MOVE=idle
+elif [ "$USAGE_5H_PCT" -ge "$TIRED_AT_5H_PCT" ] 2>/dev/null; then
+    MOVE=tired
+fi
+# A frozen status line would keep the celebration's first frame, so only an animated one celebrates.
+SINCE_TURN_END=-1
+_turn_end=""
+[ "$ANIMATE" -eq 1 ] && [ -f "$BUDDY_STATE_DIR/.last_stop_hook.$SID" ] && IFS= read -r _turn_end < "$BUDDY_STATE_DIR/.last_stop_hook.$SID"
+case "$_turn_end" in ''|*[!0-9]*) ;; *) SINCE_TURN_END=$(( NOW - _turn_end )) ;; esac
+FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
+    --argjson sweat "$SWEAT" --argjson since_turn_end "$SINCE_TURN_END" '
+    def at($sequence): $sequence[$now % ($sequence | length)];
+    (if $sweat then (.sweat // {}) else {} end) as $sweat_set
+    | (if $tier == "compact" then ($sweat_set.compactFrames // .compactFrames? // .frames)
+     elif $tier == "minimal" then ($sweat_set.minimalFrames // .minimalFrames? // .frames)
+     else ($sweat_set.frames // .frames) end) as $set
+    | (if $since_turn_end >= 0 and $since_turn_end < (.celebrateSequence | length) then .celebrateSequence[$since_turn_end]
+       elif $move == "idle" and (.idleSequence | length) > 0 then at(.idleSequence)
+       elif $move == "tired" and (.tiredSequence | length) > 0 then at(.tiredSequence)
+       else at(.frameSequence) end) as $idx
     | ((($set[0] // .frames[0] // "") | split("\n")[0] | test("^\\s*$")) | if . then "trim" else "keep" end)
       + "\n" + (($set[$idx] // .frames[$idx]) // "")
 ' "$STATE" 2>/dev/null)
@@ -540,8 +572,8 @@ dwidth() {
     } }
     END { print w+0 }'
 }
-# Emit one display-width value per UTF-8 codepoint. ANSI-aware truncation uses
-# this profile to make one Unicode-width pass over the complete output row.
+# Prints the total display width, then one width per UTF-8 codepoint, on one line. ANSI-aware
+# truncation uses this profile to make one Unicode-width pass over the complete output row.
 dwidth_profile() {
     printf '%s' "$1" | iconv -f UTF-8 -t UTF-32LE 2>/dev/null | od -An -tu4 -v | awk -v pres="$EMOJI_PRES_2600" -v text="$EMOJI_TEXT" '
     function load_ranges(value, target,    n, i, count, piece, bounds, start, end, cp) {
@@ -586,7 +618,9 @@ dwidth_profile() {
         }
     }
     END {
-        for (j = 1; j <= idx; j++) print widths[j] + 0
+        line = ""
+        for (j = 1; j <= idx; j++) { total += widths[j]; line = line " " (widths[j] + 0) }
+        print (total + 0) line
     }'
 }
 ART_W=0
@@ -853,19 +887,29 @@ ansi_seq_end() {
     ANSI_SEQ_END=$i
 }
 
-# Sets ANSI_PLAIN to $1 without escape sequences.
+# Sets ANSI_PLAIN to $1 without escape sequences, with the same ends as ansi_seq_end. It jumps from
+# escape to escape: bash finds the Nth character of a UTF-8 string by walking from its start.
 ansi_strip() {
-    local text="$1" len=${#1} i=0
+    local rest="$1" st=$'\033\\' to_bel to_st
     ANSI_PLAIN=""
-    while [ "$i" -lt "$len" ]; do
-        if [ "${text:$i:1}" = $'\033' ]; then
-            ansi_seq_end "$text" "$i"
-            i=$ANSI_SEQ_END
-            continue
+    while [[ "$rest" == *$'\033'* ]]; do
+        ANSI_PLAIN="${ANSI_PLAIN}${rest%%$'\033'*}"
+        rest="${rest#*$'\033'}"
+        if [ "${rest:0:1}" = "]" ]; then
+            to_bel="${rest%%$'\a'*}"
+            to_st="${rest%%"$st"*}"
+            if [ "${#to_bel}" -lt "${#to_st}" ]; then
+                rest="${rest:$(( ${#to_bel} + 1 ))}"
+            elif [ "$to_st" != "$rest" ]; then
+                rest="${rest:$(( ${#to_st} + 2 ))}"
+            else
+                rest=""
+            fi
+        else
+            case "$rest" in *m*) rest="${rest#*m}" ;; *) rest="" ;; esac
         fi
-        ANSI_PLAIN="${ANSI_PLAIN}${text:$i:1}"
-        i=$(( i + 1 ))
     done
+    ANSI_PLAIN="${ANSI_PLAIN}${rest}"
 }
 
 ansi_truncate() {
@@ -877,7 +921,7 @@ ansi_truncate() {
     local text_len=${#text}
     local char seq char_width truncated=0 saw_sgr=0 link_open=0
     local visible_width=0
-    local -a widths
+    local -a widths profile
     local visible_index=0
 
     [ "$max_width" -lt 0 ] && max_width=0
@@ -889,11 +933,14 @@ ansi_truncate() {
     plain="$ANSI_PLAIN"
     [ "$plain" != "$text" ] && saw_sgr=1
 
-    widths=()
-    if [ -n "$plain" ]; then
-        while IFS= read -r char_width; do
-            widths+=("$char_width")
-        done < <(dwidth_profile "$plain")
+    profile=(0)
+    [ -n "$plain" ] && read -r -a profile < <(dwidth_profile "$plain")
+    widths=("${profile[@]:1}")
+    # A row that fits comes out unchanged, so skip the per-character walk. A profile that does not
+    # cover every character (iconv refused the text) falls through to the walk's 1-column default.
+    if [ "${#widths[@]}" -eq "${#plain}" ] && [ "${profile[0]}" -le "$max_width" ]; then
+        printf '%s' "$text"
+        return
     fi
 
     i=0
@@ -1007,7 +1054,7 @@ render_output() {
 if [ -n "$RENDER_CACHE" ]; then
     RENDERED=$(render_output)
     printf '%s\n' "$RENDERED"
-    printf '%s\n%s\n' "$RENDER_KEY" "$RENDERED" > "$RENDER_CACHE.tmp.$$" && mv "$RENDER_CACHE.tmp.$$" "$RENDER_CACHE"
+    printf '%s\n' "$RENDERED" > "$RENDER_CACHE.tmp.$$" && mv "$RENDER_CACHE.tmp.$$" "$RENDER_CACHE"
 else
     render_output
 fi

@@ -454,6 +454,69 @@ describe("buddy sub-status cache", () => {
     expect(lines.every((line) => displayWidth(line) <= 46)).toBe(true);
   });
 
+  test("a muted buddy prints nothing", () => {
+    const { configDir, stateDir } = createStatuslineFixture({});
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, muted: true }));
+
+    expect(runStatusline(configDir).stdout.toString()).toBe("");
+  });
+
+  test("the light theme darkens the rarity color", () => {
+    const { configDir } = createStatuslineFixture({ theme: "light", statuslineDensity: "full" });
+
+    expect(runStatusline(configDir).stdout.toString()).toContain("\x1b[38;2;90;90;90m  art");
+  });
+
+  test("a shiny buddy paints its art with the configured rainbowColors", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ rainbowColors: ["#010203"], statuslineDensity: "full" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, shiny: true }));
+
+    expect(runStatusline(configDir).stdout.toString()).toContain("\x1b[38;2;1;2;3m  art");
+  });
+
+  test("bubbleWidth and bubbleMargin size the speech bubble", () => {
+    const dashes = (config: Record<string, unknown>, columns: string) => {
+      const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full", ...config });
+      writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction: "word ".repeat(30), timestamp: Date.now() }));
+      return runStatusline(configDir, "{}\n", columns).stdout.toString().match(/\.(-+)\./)![1].length;
+    };
+
+    expect(dashes({ bubbleWidth: 20 }, "120")).toBe(22);
+    expect(dashes({ bubbleMargin: 8 }, "60") - dashes({ bubbleMargin: 10 }, "60")).toBe(2);
+  });
+
+  test("shows the level after the name once it is above 1", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, level: 3 }));
+
+    expect(runStatusline(configDir).stdout.toString()).toContain("Nimbus [L3]");
+  });
+
+  test("takes the level from xp.json, which awarding XP updates, over the older copy in status.json", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, level: 3 }));
+    const xpFile = join(stateDir, "xp.json");
+
+    writeFileSync(xpFile, JSON.stringify({ totalXp: 900, level: 4 }, null, 2));
+    expect(runStatusline(configDir).stdout.toString()).toContain("Nimbus [L4]");
+
+    writeFileSync(xpFile, "{ half-written");
+    expect(runStatusline(configDir).stdout.toString()).toContain("Nimbus [L3]");
+  });
+
+  test("truncates a sub-status row that is not valid UTF-8 to the budget", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ subStatusCommand: "printf ignored" });
+    writeFileSync(join(stateDir, ".substatus.default"), Buffer.concat([Buffer.from([0xff]), Buffer.from(`${"A".repeat(200)}\n`)]));
+
+    const row = runStatusline(configDir, "{}\n", "60").stdout.toString().split("\n").find((l) => l.includes("AAAA"));
+
+    expect(row!.length).toBeLessThanOrEqual(46);
+  });
+
   test("measures a sub-status OSC 8 link by its visible text only", () => {
     const { configDir, stateDir } = createStatuslineFixture({ subStatusCommand: "printf ignored" });
     const link = "\x1b]8;;https://github.com/ramarivera/coding-buddy/tree/main\x1b\\main\x1b]8;;\x1b\\";
@@ -599,23 +662,93 @@ describe("buddy sub-status cache", () => {
     expect(at("1", "")).not.toBe(at("2", ""));
   });
 
-  test("an unfocused session reprints its cached render until something it reads changes", () => {
+  describe("moves driven by the session", () => {
+    const now = 1_700_000_000;
+    const fixture = (status: Record<string, unknown>, config: Record<string, unknown> = {}) => {
+      const made = createStatuslineFixture({ statuslineDensity: "full", ...config });
+      const base = JSON.parse(readFileSync(join(made.stateDir, "status.json"), "utf8"));
+      writeFileSync(join(made.stateDir, "status.json"), JSON.stringify({
+        ...base, frames: ["  art-rest", "  art-tired", "  art-asleep", "  art-cheer"], frameSequence: [0], ...status,
+      }));
+      return made;
+    };
+    const render = (configDir: string, input: Record<string, unknown>, env: Record<string, string> = {}) =>
+      runStatusline(configDir, JSON.stringify(input), "80", { BUDDY_FAKE_NOW: String(now), ...env }).stdout.toString();
+
+    test("sweats from 40% of the context", () => {
+      const { configDir } = fixture({ sweat: { frames: ["  art-sweat"] } });
+
+      expect(render(configDir, { context_window: { used_percentage: 40 } })).toContain("art-sweat");
+      expect(render(configDir, { context_window: { used_percentage: 39.9 } })).toContain("art-rest");
+    });
+
+    test("draws from the tired pool from 50% of the 5-hour limit", () => {
+      const { configDir } = fixture({ tiredSequence: [1] });
+
+      expect(render(configDir, { rate_limits: { five_hour: { used_percentage: 50 } } })).toContain("art-tired");
+      expect(render(configDir, { rate_limits: { five_hour: { used_percentage: 49 } } })).toContain("art-rest");
+    });
+
+    test("falls asleep once the transcript has been quiet for five minutes, tired or not", () => {
+      const { configDir } = fixture({ tiredSequence: [1], idleSequence: [2] });
+      const transcript = join(configDir, "session.jsonl");
+      writeFileSync(transcript, "{}\n");
+      const input = { transcript_path: transcript, rate_limits: { five_hour: { used_percentage: 90 } } };
+
+      utimesSync(transcript, now - 300, now - 300);
+      expect(render(configDir, input)).toContain("art-asleep");
+      utimesSync(transcript, now - 299, now - 299);
+      expect(render(configDir, input)).toContain("art-tired");
+    });
+
+    test("celebrates in the ticks right after a turn ends, only where it animates", () => {
+      const { configDir, stateDir } = fixture({ celebrateSequence: [3, 3] });
+      const turnEnd = (secondsAgo: number) => writeFileSync(join(stateDir, ".last_stop_hook.default"), String(now - secondsAgo));
+
+      turnEnd(1);
+      expect(render(configDir, {})).toContain("art-cheer");
+      turnEnd(2);
+      expect(render(configDir, {})).toContain("art-rest");
+
+      turnEnd(1);
+      writeFileSync(join(stateDir, "config.json"), JSON.stringify({ statuslineDensity: "full", animate: "focused" }));
+      writeFileSync(join(stateDir, "focused-session"), "AAA");
+      expect(render(configDir, {}, { ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
+    });
+  });
+
+  test("an unfocused session reprints its render while Claude Code's input changes every tick", () => {
     const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "minimal", animate: "focused" });
-    writeFileSync(join(stateDir, "focused-session"), "AAA");
-    const now = String(Math.floor(Date.now() / 1000));
-    const run = (session: string) =>
-      runStatusline(configDir, "{}\n", "80", { BUDDY_FAKE_NOW: now, ITERM_SESSION_ID: session }).stdout.toString();
+    const configFile = join(stateDir, "config.json");
+    const reactionFile = join(stateDir, "reaction.default.json");
     const cache = join(stateDir, ".render.default");
+    const focus = (session: string) => writeFileSync(join(stateDir, "focused-session"), session);
+    const age = (path: string, seconds: number) => utimesSync(path, Date.now() / 1000 - seconds, Date.now() / 1000 - seconds);
+    const cached = () => { writeFileSync(cache, "FROM-CACHE\n"); age(cache, 50); };
+    const tick = (n: number) =>
+      runStatusline(configDir, JSON.stringify({ cost: { total_duration_ms: n } }), "80", { ITERM_SESSION_ID: "w0t1p0:BBB" }).stdout.toString();
+    focus("AAA");
+    age(configFile, 100);
 
-    run("w0t1p0:BBB");
-    writeFileSync(cache, `${readFileSync(cache, "utf8").split("\n")[0]}\nFROM-CACHE\n`);
+    cached();
+    expect(tick(1)).toBe("FROM-CACHE\n");
 
-    expect(run("w0t1p0:BBB")).toBe("FROM-CACHE\n");
-    expect(run("w0t0p0:AAA")).not.toContain("FROM-CACHE");
+    writeFileSync(reactionFile, JSON.stringify({ reaction: "NEW-REACTION", timestamp: Date.now() }));
+    expect(tick(2)).toContain("NEW-REACTION");
 
-    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction: "NEW-REACTION", timestamp: Date.now() }));
+    age(reactionFile, 100);
+    cached();
+    writeFileSync(configFile, readFileSync(configFile));
+    expect(tick(3)).not.toContain("FROM-CACHE");
 
-    expect(run("w0t1p0:BBB")).toContain("NEW-REACTION");
+    age(configFile, 100);
+    cached();
+    focus("BBB");
+    tick(4);
+    focus("AAA");
+    const afterFocus = tick(5);
+    expect(afterFocus).not.toContain("FROM-CACHE");
+    expect(readFileSync(cache, "utf8")).toBe(afterFocus);
   });
 
   test("bubble text is italic in the buddy color, not faint", () => {
