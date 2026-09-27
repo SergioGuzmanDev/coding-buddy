@@ -738,19 +738,19 @@ describe("buddy sub-status cache", () => {
       expect(readFileSync(signals, "utf8")).toBe("sweat=false tired=true\n");
     });
 
-    test("celebrates in the ticks right after a turn ends, only where it animates", () => {
-      const { configDir, stateDir } = fixture({ celebrateSequence: [3, 3] });
-      const turnEnd = (secondsAgo: number) => writeFileSync(join(stateDir, ".last_stop_hook.default"), String(now - secondsAgo));
+    test("a finished turn moves nothing until its reaction, whose move shows in the same render as its text", () => {
+      const { configDir, stateDir } = fixture({ celebrateSequence: [3, 3], moveSequences: { cigarette: [1] } });
+      const clock = Math.floor(Date.now() / 1000);
+      const at = { BUDDY_FAKE_NOW: String(clock) };
+      writeFileSync(join(stateDir, ".last_stop_hook.default"), String(clock - 1));
 
-      turnEnd(1);
-      expect(render(configDir, {})).toContain("art-cheer");
-      turnEnd(2);
-      expect(render(configDir, {})).toContain("art-rest");
+      expect(render(configDir, {}, at)).toContain("art-rest");
 
-      turnEnd(1);
-      writeFileSync(join(stateDir, "config.json"), JSON.stringify({ statuslineDensity: "full", animate: "focused" }));
-      writeFileSync(join(stateDir, "focused-session"), "AAA");
-      expect(render(configDir, {}, { ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
+      writeFileSync(join(stateDir, "reaction.default.json"),
+        JSON.stringify({ reaction: "*da una calada*", timestamp: clock * 1000, move: "cigarette" }));
+      const shown = render(configDir, {}, at);
+      expect(shown).toContain("*da una calada*");
+      expect(shown).toContain("art-tired");
     });
   });
 

@@ -491,7 +491,6 @@ export interface StatusState {
   frameSequence: number[];
   tiredSequence?: number[];
   idleSequence?: number[];
-  celebrateSequence?: number[];
   moveSequences?: Record<string, number[]>;
   sweat?: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
   level: number;
@@ -537,7 +536,7 @@ export function writeStatusState(
   const safeEye = resolveEyeGlyph(companion.bones.eye);
   const artResult = getStatusFrames(companion.bones) as Partial<ReturnType<typeof Art.getStatusFrames>> &
     Pick<StatusState, "frames" | "frameSequence">;
-  const { frames, frameSequence, tiredSequence, idleSequence, celebrateSequence, moveSequences, sweat } = artResult;
+  const { frames, frameSequence, tiredSequence, idleSequence, moveSequences, sweat } = artResult;
   const compactFrames =
     artResult.compactFrames && artResult.compactFrames.length > 0
       ? artResult.compactFrames
@@ -582,7 +581,6 @@ export function writeStatusState(
     frameSequence,
     tiredSequence,
     idleSequence,
-    celebrateSequence,
     moveSequences,
     sweat,
     level: xpLevel,

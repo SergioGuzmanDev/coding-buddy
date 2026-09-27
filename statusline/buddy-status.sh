@@ -432,11 +432,7 @@ if [ -f "$TRANSCRIPT" ] && [ $(( NOW - $(_substatus_mtime "$TRANSCRIPT") )) -ge 
 elif [ "$TIRED" = true ]; then
     MOVE=tired
 fi
-# A frozen status line would keep the celebration's first frame, so only an animated one celebrates.
-SINCE_TURN_END=-1
-_turn_end=""
-[ "$ANIMATE" -eq 1 ] && [ -f "$BUDDY_STATE_DIR/.last_stop_hook.$SID" ] && IFS= read -r _turn_end < "$BUDDY_STATE_DIR/.last_stop_hook.$SID"
-case "$_turn_end" in ''|*[!0-9]*) ;; *) SINCE_TURN_END=$(( NOW - _turn_end )) ;; esac
+# A frozen status line would keep the move's first frame, so only an animated one acts it out.
 SINCE_REACTION=-1
 case "$TS" in
     ''|*[!0-9]*) ;;
@@ -444,15 +440,13 @@ case "$TS" in
         && SINCE_REACTION=$(( NOW - TS / 1000 )) ;;
 esac
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
-    --argjson sweat "$SWEAT" --argjson since_turn_end "$SINCE_TURN_END" \
-    --arg reaction_move "$REACTION_MOVE" --argjson since_reaction "$SINCE_REACTION" '
+    --argjson sweat "$SWEAT" --arg reaction_move "$REACTION_MOVE" --argjson since_reaction "$SINCE_REACTION" '
     def at($sequence): $sequence[$now % ($sequence | length)];
     (if $sweat then (.sweat // {}) else {} end) as $sweat_set
     | (if $tier == "compact" then ($sweat_set.compactFrames // .compactFrames? // .frames)
      elif $tier == "minimal" then ($sweat_set.minimalFrames // .minimalFrames? // .frames)
      else ($sweat_set.frames // .frames) end) as $set
-    | (if $since_turn_end >= 0 and $since_turn_end < (.celebrateSequence | length) then .celebrateSequence[$since_turn_end]
-       elif $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0
+    | (if $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0
            then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
        elif $move == "idle" and (.idleSequence | length) > 0 then at(.idleSequence)
        elif $move == "tired" and (.tiredSequence | length) > 0 then at(.tiredSequence)

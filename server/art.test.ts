@@ -173,9 +173,9 @@ describe("getStatusFrames", () => {
       const { frames, frameSequence } = getStatusFrames(octopus, () => (move + 0.5) / pool.length);
       moving(frames, frameSequence, `pool move ${move}`);
     }
-    const { frames, idleSequence, celebrateSequence } = getStatusFrames(octopus);
+    const { frames, idleSequence, moveSequences } = getStatusFrames(octopus);
     moving(frames, idleSequence!, "idle");
-    moving(frames, celebrateSequence!, "celebration");
+    moving(frames, moveSequences!.celebrate, "celebration");
   });
 
   test("a tired octopus sleeps or yawns in at least half of its moves, a rested one far less", () => {
@@ -191,13 +191,14 @@ describe("getStatusFrames", () => {
     expect(drowsyShare(frameSequence)).toBeLessThan(0.3);
   });
 
-  test("the idle loop sleeps and a finished turn is celebrated with raised arms", () => {
-    const { frames, minimalFrames, idleSequence, celebrateSequence } = getStatusFrames(octopus);
+  test("the idle loop sleeps and the celebration raises the arms", () => {
+    const { frames, minimalFrames, idleSequence, moveSequences } = getStatusFrames(octopus);
+    const celebrateSequence = moveSequences!.celebrate;
 
     expect(idleSequence!.every((i) => frames[i].includes("( -  - )"))).toBe(true);
-    expect(celebrateSequence!.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
-    expect(celebrateSequence!.some((i) => frames[i].includes("\\( ^  ^ )/"))).toBe(true);
-    expect(celebrateSequence!.some((i) => minimalFrames[i] === "\\(^^)/")).toBe(true);
+    expect(celebrateSequence.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
+    expect(celebrateSequence.some((i) => frames[i].includes("\\( ^  ^ )/"))).toBe(true);
+    expect(celebrateSequence.some((i) => minimalFrames[i] === "\\(^^)/")).toBe(true);
   });
 
   test("each move Gemini can pick has its own sequence, drawn from that move's frames", () => {

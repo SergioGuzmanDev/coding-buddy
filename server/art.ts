@@ -418,7 +418,6 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   frameSequence: number[];
   tiredSequence?: number[];
   idleSequence?: number[];
-  celebrateSequence?: number[];
   moveSequences?: Record<string, number[]>;
   sweat: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
 } {
@@ -461,7 +460,6 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   let frameSequence = [...STATUS_FRAME_SEQUENCE];
   let tiredSequence: number[] | undefined;
   let idleSequence: number[] | undefined;
-  let celebrateSequence: number[] | undefined;
   let moveSequences: Record<string, number[]> | undefined;
   const moves = STATUS_MOVES[bones.species];
   if (moves) {
@@ -493,7 +491,6 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
     frameSequence = drawSlots(() => 1);
     tiredSequence = drawSlots((move) => move.tiredWeight ?? 1);
     idleSequence = played(moves.idle);
-    celebrateSequence = played(moves.celebrate);
     moveSequences = Object.fromEntries(statusMoveChoices(bones.species).map((move) => [move.name, played(move)]));
   }
   const sweatFrames = frames.map(withSweat);
@@ -504,7 +501,6 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
     frameSequence,
     tiredSequence,
     idleSequence,
-    celebrateSequence,
     moveSequences,
     sweat: {
       frames: sweatFrames,
