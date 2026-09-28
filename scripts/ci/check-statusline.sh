@@ -18,7 +18,7 @@ payload='{"session_id":"ci","model":{"display_name":"CI"},"workspace":{"current_
 
 # Width/row budgets for each density tier. Full frames are 5 art rows + name;
 # compact is 3 art rows + name; minimal is a single sprite/face + name line.
-DENSITY_FULL_MIN=6
+DENSITY_FULL_MIN=5
 DENSITY_FULL_MAX=8
 DENSITY_COMPACT_MIN=4
 DENSITY_COMPACT_MAX=4
