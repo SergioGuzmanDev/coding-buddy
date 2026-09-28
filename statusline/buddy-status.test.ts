@@ -678,11 +678,23 @@ describe("buddy sub-status cache", () => {
     const render = (configDir: string, input: Record<string, unknown>, env: Record<string, string> = {}) =>
       runStatusline(configDir, JSON.stringify(input), "80", { BUDDY_FAKE_NOW: String(now), ...env }).stdout.toString();
 
-    test("sweats from 40% of the context", () => {
+    test("sweats from 40% of the context, the drop showing 4 seconds out of every 20", () => {
       const { configDir } = fixture({ sweat: { frames: ["  art-sweat"] } });
+      const at = (seconds: number, pct = 40) =>
+        render(configDir, { context_window: { used_percentage: pct } }, { BUDDY_FAKE_NOW: String(now + seconds) });
 
-      expect(render(configDir, { context_window: { used_percentage: 40 } })).toContain("art-sweat");
-      expect(render(configDir, { context_window: { used_percentage: 39.9 } })).toContain("art-rest");
+      expect(at(0)).toContain("art-sweat");
+      expect(at(3)).toContain("art-sweat");
+      expect(at(4)).toContain("art-rest");
+      expect(at(19)).toContain("art-rest");
+      expect(at(20)).toContain("art-sweat");
+      expect(at(0, 39.9)).toContain("art-rest");
+    });
+
+    test("a frozen status line keeps the drop while sweating", () => {
+      const { configDir } = fixture({ sweat: { frames: ["  art-sweat"] } }, { animate: false });
+
+      expect(render(configDir, { context_window: { used_percentage: 40 } }, { BUDDY_FAKE_NOW: String(now + 10) })).toContain("art-sweat");
     });
 
     test("draws from the tired pool from 50% of the 5-hour limit", () => {
@@ -751,7 +763,7 @@ describe("buddy sub-status cache", () => {
       const { configDir, stateDir } = fixture({});
       const signals = join(stateDir, ".signals.default");
 
-      render(configDir, { context_window: { used_percentage: 45 } });
+      render(configDir, { context_window: { used_percentage: 45 } }, { BUDDY_FAKE_NOW: String(now + 10) });
       expect(readFileSync(signals, "utf8")).toBe("sweat=true tired=false\n");
 
       utimesSync(signals, now - 100, now - 100);

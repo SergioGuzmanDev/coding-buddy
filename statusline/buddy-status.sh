@@ -433,6 +433,8 @@ fi
 
 # ─── Animation: pick current density frame from server-rendered frames ───────
 SWEAT_AT_CONTEXT_PCT=40
+SWEAT_EVERY_SECONDS=20
+SWEAT_SHOWN_SECONDS=4
 TIRED_AT_5H_PCT=50
 ASLEEP_AFTER_IDLE_SECONDS=300
 REACTION_MOVE_SECONDS=30
@@ -460,8 +462,11 @@ case "$TS" in
     *) [ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE$REACTION_MOOD" ] && [ $(( NOW - TS / 1000 )) -lt "$REACTION_MOVE_SECONDS" ] \
         && SINCE_REACTION=$(( NOW - TS / 1000 )) ;;
 esac
+# The drop comes and goes while sweating. A frozen status line has no clock to blink by, so it keeps it.
+SWEAT_DRAWN=false
+[ "$SWEAT" = true ] && [ $(( (ANIMATE ? NOW : 0) % SWEAT_EVERY_SECONDS )) -lt "$SWEAT_SHOWN_SECONDS" ] && SWEAT_DRAWN=true
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
-    --argjson sweat "$SWEAT" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
+    --argjson sweat "$SWEAT_DRAWN" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
     --argjson since_reaction "$SINCE_REACTION" '
     def at($sequence): $sequence[$now % ($sequence | length)];
     (if $sweat then (.sweat // {}) else {} end) as $sweat_set
