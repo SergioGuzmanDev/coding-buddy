@@ -87,6 +87,7 @@ export function earlierConversation(transcriptPath: string, latest: string[]): s
 /** How the status line draws the buddy right now, as last written there to `.signals.<sid>`. */
 export interface BuddyLook {
   sweating: boolean;
+  contextPct: number;
   tired: boolean;
 }
 
@@ -97,7 +98,18 @@ export function readBuddyLook(stateDir: string): BuddyLook {
   } catch {
     // No status line render yet in this session.
   }
-  return { sweating: /\bsweat=true\b/.test(signals), tired: /\btired=true\b/.test(signals) };
+  return {
+    sweating: /\bsweat=true\b/.test(signals),
+    contextPct: Number(/\bcontext=(\d+)\b/.exec(signals)?.[1] ?? 0),
+    tired: /\btired=true\b/.test(signals),
+  };
+}
+
+// The drop is drawn from 40%, but a single "you are sweating" made Gemini panic at 40% as much as at 90%.
+function sweatLine(contextPct: number): string {
+  if (contextPct < 50) return "The conversation's context window is getting fuller, which makes you slightly uneasy. Barely let it show.";
+  if (contextPct < 75) return "You are a bit nervous: the conversation's context window is over half full.";
+  return "You are sweating: the conversation's context window is nearly full.";
 }
 
 export function buildPrompt(
@@ -105,7 +117,7 @@ export function buildPrompt(
   assistantMessage: string,
   userMessage: string,
   earlier = "",
-  look: BuddyLook = { sweating: false, tired: false },
+  look: BuddyLook = { sweating: false, contextPct: 0, tired: false },
 ): string {
   const b = companion.bones;
   const moves = statusMoveChoices(b.species);
@@ -113,7 +125,7 @@ export function buildPrompt(
     `You are ${companion.name}, a ${b.rarity} ${b.species} living in a developer's terminal status line, watching them work with an AI coding assistant.`,
     `Personality: ${companion.personality}`,
     `Strongest trait: ${b.peak}. Weakest trait: ${b.dump}.`,
-    ...(look.sweating ? ["You are sweating: the conversation's context window is filling up."] : []),
+    ...(look.sweating ? [sweatLine(look.contextPct)] : []),
     ...(look.tired ? ["You are tired: most of the developer's 5-hour usage limit is spent."] : []),
     "",
     "Write ONE in-character reaction to the latest exchange below. It must fit a small speech bubble: 3 or 4 short lines, about 40 characters each.",

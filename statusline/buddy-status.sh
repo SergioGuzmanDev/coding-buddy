@@ -442,8 +442,8 @@ SWEAT=false
 [ "$CONTEXT_PCT" -ge "$SWEAT_AT_CONTEXT_PCT" ] 2>/dev/null && SWEAT=true
 TIRED=false
 [ "$USAGE_5H_PCT" -ge "$TIRED_AT_5H_PCT" ] 2>/dev/null && TIRED=true
-# gemini-react reads this at the end of a turn so its reaction matches how the buddy is drawn.
-_signals="sweat=$SWEAT tired=$TIRED"
+# gemini-react reads this at the end of a turn so its reaction matches how the buddy is drawn and how full the context is.
+_signals="sweat=$SWEAT context=$CONTEXT_PCT tired=$TIRED"
 _old_signals=""
 [ -f "$BUDDY_STATE_DIR/.signals.$SID" ] && IFS= read -r _old_signals < "$BUDDY_STATE_DIR/.signals.$SID"
 [ "$_signals" = "$_old_signals" ] || printf '%s\n' "$_signals" > "$BUDDY_STATE_DIR/.signals.$SID"

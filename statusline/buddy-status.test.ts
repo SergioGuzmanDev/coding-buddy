@@ -759,19 +759,19 @@ describe("buddy sub-status cache", () => {
       expect(reacted(1, "furious")).not.toContain(red);
     });
 
-    test("records whether it is sweating or tired for gemini-react, writing only when that changes", () => {
+    test("records sweat, context and tiredness for gemini-react, writing only when that changes", () => {
       const { configDir, stateDir } = fixture({});
       const signals = join(stateDir, ".signals.default");
 
       render(configDir, { context_window: { used_percentage: 45 } }, { BUDDY_FAKE_NOW: String(now + 10) });
-      expect(readFileSync(signals, "utf8")).toBe("sweat=true tired=false\n");
+      expect(readFileSync(signals, "utf8")).toBe("sweat=true context=45 tired=false\n");
 
       utimesSync(signals, now - 100, now - 100);
-      render(configDir, { context_window: { used_percentage: 46 } });
+      render(configDir, { context_window: { used_percentage: 45 } });
       expect(Math.round(statSync(signals).mtimeMs / 1000)).toBe(now - 100);
 
       render(configDir, { context_window: { used_percentage: 10 }, rate_limits: { five_hour: { used_percentage: 60 } } });
-      expect(readFileSync(signals, "utf8")).toBe("sweat=false tired=true\n");
+      expect(readFileSync(signals, "utf8")).toBe("sweat=false context=10 tired=true\n");
     });
 
     test("a finished turn moves nothing until its reaction, whose move shows in the same render as its text", () => {

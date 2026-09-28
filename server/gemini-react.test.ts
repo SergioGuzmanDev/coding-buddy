@@ -164,9 +164,25 @@ describe("gemini-react", () => {
       return readFileSync(join(root, "args.log"), "utf8");
     };
 
-    expect(prompt("sweat=true tired=true\n")).toContain("You are sweating");
-    expect(prompt("sweat=true tired=true\n")).toContain("You are tired");
-    expect(prompt("sweat=false tired=false\n")).not.toMatch(/You are (sweating|tired)/);
+    expect(prompt("sweat=true context=80 tired=true\n")).toContain("You are sweating");
+    expect(prompt("sweat=true context=80 tired=true\n")).toContain("You are tired");
+    expect(prompt("sweat=false context=10 tired=false\n")).not.toMatch(/You are (sweating|tired)|context window/);
+  });
+
+  test("worries about the context window only a little until it is half full", () => {
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
+    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const prompt = (context: number) => {
+      writeFileSync(join(stateDir, ".signals.sessionA"), `sweat=true context=${context} tired=false\n`);
+      reactWithGemini("reply", "ask", { bin });
+      return readFileSync(join(root, "args.log"), "utf8");
+    };
+
+    expect(prompt(45)).toContain("slightly uneasy");
+    expect(prompt(45)).not.toMatch(/nervous|sweating/);
+    expect(prompt(60)).toContain("a bit nervous");
+    expect(prompt(60)).not.toContain("You are sweating");
+    expect(prompt(80)).toContain("You are sweating");
   });
 
   test("says it is sleeping when the agy CLI is missing", () => {
