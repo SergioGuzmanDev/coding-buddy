@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { handleBuddyComment } from "./buddy-comment.ts";
+import { spawnSync } from "child_process";
+import { handleBuddyComment, sweepStaleSessionFiles } from "./buddy-comment.ts";
 
 function makeStateDir(): string {
   return mkdtempSync(join(tmpdir(), "coding-buddy-comment-"));
@@ -328,5 +329,63 @@ describe("adoption age ceiling", () => {
     expect(existsSync(join(stateDir, "reaction.NEWSID.json")) &&
       JSON.parse(readFileSync(join(stateDir, "reaction.NEWSID.json"), "utf8")).reaction)
       .not.toBe("*from an ancient turn*");
+  });
+});
+
+describe("stale session file sweep", () => {
+  const NOW = 1_800_000_000_000;
+  const DAY = 24 * 60 * 60_000;
+
+  function file(dir: string, name: string, ageMs: number, isDir = false): string {
+    const path = join(dir, name);
+    if (isDir) mkdirSync(path);
+    else writeFileSync(path, "x");
+    utimesSync(path, (NOW - ageMs) / 1000, (NOW - ageMs) / 1000);
+    return path;
+  }
+
+  test("drops a session idle for a week and tmp leftovers, keeps live sessions and status line reactions", () => {
+    const dir = makeStateDir();
+    dirs.push(dir);
+    const kept = [
+      file(dir, "status.json", 30 * DAY),
+      file(dir, ".session_start.live1234", 30 * DAY),
+      file(dir, ".render.live1234", 8 * DAY),
+      file(dir, ".last_stop_hook.live1234", 60_000),
+      file(dir, ".render.live1234.tmp.99", 5 * 60_000),
+      file(dir, "reaction.gone5678.json", 30 * DAY),
+      file(dir, ".last_comment.gone5678", 30 * DAY),
+    ];
+    const dropped = [
+      file(dir, ".session_start.gone5678", 30 * DAY),
+      file(dir, ".substatus.gone5678", 8 * DAY),
+      file(dir, ".substatus.gone5678.lock", 8 * DAY, true),
+      file(dir, ".signals.gone5678", 8 * DAY),
+      file(dir, ".substatus.live1234.tmp", 2 * 60 * 60_000),
+      file(dir, "reaction.live1234.json.tmp.1.2", 2 * 60 * 60_000),
+    ];
+
+    sweepStaleSessionFiles(dir, NOW);
+
+    expect(kept.filter((path) => !existsSync(path))).toEqual([]);
+    expect(dropped.filter((path) => existsSync(path))).toEqual([]);
+  });
+
+  test("the Stop hook runs the sweep", () => {
+    const root = makeStateDir();
+    dirs.push(root);
+    const dir = join(root, "buddy-state");
+    mkdirSync(dir);
+    const stale = join(dir, ".render.gone5678");
+    writeFileSync(stale, "x");
+    utimesSync(stale, (Date.now() - 8 * DAY) / 1000, (Date.now() - 8 * DAY) / 1000);
+
+    const result = spawnSync(process.execPath, [join(import.meta.dir, "buddy-comment.ts")], {
+      env: { CLAUDE_CONFIG_DIR: root, HOME: root, PATH: process.env.PATH ?? "" },
+      input: "{}",
+    });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(stale)).toBe(false);
   });
 });

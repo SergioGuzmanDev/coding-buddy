@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
   defaultSpawnDetached,
@@ -185,6 +185,42 @@ function findFreshToolReaction(
   return best;
 }
 
+// reaction.<sid>.json and .last_comment.<sid> are absent: the status line expires those by reactionTTL.
+const SESSION_FILE =
+  /^\.(substatus|substatus-sweep|render|signals|last_stop_hook|last_reaction|last_mood|last_bad|error_streak|session_start)\.([^.]+)(\.lock)?$/;
+const TMP_LEFTOVER = /^(\.[a-z_-]+\.[^.]+|reaction\.[^.]+\.json)\.tmp(\.|$)/;
+const TMP_LEFTOVER_AGE_MS = 60 * 60_000;
+// A day would also catch an unfocused tab left overnight, whose rebuilt render cache then lacks the sub-status row.
+const IDLE_SESSION_AGE_MS = 7 * 24 * 60 * 60_000;
+
+/** Deletes tmp files a killed writer left behind, and every file of a session none of whose files changed in a week. */
+export function sweepStaleSessionFiles(stateDir: string, nowMs: number): void {
+  const sessions = new Map<string, { newest: number; paths: string[] }>();
+  for (const name of readdirSync(stateDir)) {
+    const tmp = TMP_LEFTOVER.test(name);
+    const session = tmp ? null : SESSION_FILE.exec(name);
+    if (!tmp && !session) continue;
+    const path = join(stateDir, name);
+    let mtime: number;
+    try {
+      mtime = statSync(path).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (tmp) {
+      if (nowMs - mtime > TMP_LEFTOVER_AGE_MS) rmSync(path, { force: true });
+      continue;
+    }
+    const files = sessions.get(session![2]) ?? { newest: 0, paths: [] };
+    files.newest = Math.max(files.newest, mtime);
+    files.paths.push(path);
+    sessions.set(session![2], files);
+  }
+  for (const { newest, paths } of sessions.values()) {
+    if (nowMs - newest > IDLE_SESSION_AGE_MS) for (const path of paths) rmSync(path, { force: true, recursive: true });
+  }
+}
+
 export function handleBuddyComment(
   rawInput: string,
   runtime: HookRuntime = {},
@@ -266,6 +302,7 @@ export function handleBuddyComment(
 if (import.meta.main) {
   try {
     handleBuddyComment(await readStdin());
+    sweepStaleSessionFiles(resolveHookStateDir(), Date.now());
   } catch {
     // Claude Code hooks must never fail the turn.
   }
