@@ -116,7 +116,7 @@ export function buildPrompt(
     ...(look.sweating ? ["You are sweating: the conversation's context window is filling up."] : []),
     ...(look.tired ? ["You are tired: most of the developer's 5-hour usage limit is spent."] : []),
     "",
-    "Write ONE in-character reaction to the latest exchange below.",
+    "Write ONE in-character reaction to the latest exchange below. It must fit a small speech bubble: 3 or 4 short lines, about 40 characters each.",
     "Point at something specific from it: a pitfall, a win, a risk, a pattern. Use the earlier conversation only to understand it.",
     "Use *asterisks* for physical actions. Write in the developer's language.",
     ...(moves.length

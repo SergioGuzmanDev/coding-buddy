@@ -143,7 +143,7 @@ describe("gemini-react", () => {
     expect(invented.mood).toBeUndefined();
   });
 
-  test("keeps the whole reaction, however long and over however many lines", () => {
+  test("asks for a bubble of 3 or 4 short lines and keeps whatever comes back whole", () => {
     saveCompanion({ ...companion, bones: { ...companion.bones, species: "octopus" } });
     const first = `*sorbe su café* ${"muy bien visto, ".repeat(12).trim()}`;
     const second = "y el refresh a dos segundos se respeta.";
@@ -152,7 +152,7 @@ describe("gemini-react", () => {
     reactWithGemini("reply", "ask", { bin: fakeGemini(`cat "${root}/out.json"`) });
 
     expect(bubble().reaction).toBe(`${first} ${second}`);
-    expect(readFileSync(join(root, "args.log"), "utf8")).not.toContain("characters");
+    expect(readFileSync(join(root, "args.log"), "utf8")).toContain("3 or 4 short lines, about 40 characters each");
   });
 
   test("tells Gemini the buddy is sweating or tired when the status line draws it that way", () => {
