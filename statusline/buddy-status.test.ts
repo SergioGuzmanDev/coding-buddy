@@ -723,6 +723,28 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, {}, { ...at, ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
     });
 
+    test("paints the buddy, not its bubble, with the reaction's mood for 30 seconds, each color lasting 2 ticks", () => {
+      const { configDir, stateDir } = fixture({ moodColors: { angry: ["#FF0000", ""] } });
+      const clock = Math.floor(Date.now() / 1000);
+      const reacted = (secondsAgo: number, mood: string) => {
+        writeFileSync(join(stateDir, "reaction.default.json"),
+          JSON.stringify({ reaction: "*se enfada*", timestamp: (clock - secondsAgo) * 1000, mood }));
+        return render(configDir, {}, { BUDDY_FAKE_NOW: String(clock) });
+      };
+      const red = "\x1b[38;2;255;0;0m";
+      const own = "\x1b[38;2;153;153;153m";
+
+      const angry = reacted(1, "angry");
+      expect(angry).toContain(`${red}  art-rest`);
+      expect(angry).toContain(`${own}.---`);
+      expect(reacted(2, "angry")).toContain(`${own}  art-rest`);
+      expect(reacted(3, "angry")).toContain(`${own}  art-rest`);
+      expect(reacted(4, "angry")).toContain(`${red}  art-rest`);
+      expect(reacted(29, "angry")).toContain(`${red}  art-rest`);
+      expect(reacted(30, "angry")).not.toContain(red);
+      expect(reacted(1, "furious")).not.toContain(red);
+    });
+
     test("records whether it is sweating or tired for gemini-react, writing only when that changes", () => {
       const { configDir, stateDir } = fixture({});
       const signals = join(stateDir, ".signals.default");

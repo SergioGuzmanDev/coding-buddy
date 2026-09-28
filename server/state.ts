@@ -312,6 +312,8 @@ export interface ReactionState {
   source?: ReactionSource;
   /** A move from statusMoveChoices that the status line acts out while the reaction is new. */
   move?: string;
+  /** A STATUS_MOODS name the status line paints the buddy with over the same seconds as the move. */
+  mood?: string;
 }
 
 export function loadReaction(): ReactionState | null {
@@ -334,9 +336,10 @@ export function saveReaction(
   reason: string,
   source: ReactionSource = "fallback",
   move?: string,
+  mood?: string,
 ): void {
   mkdirSync(stateDir(), { recursive: true });
-  const state: ReactionState = { reaction, timestamp: Date.now(), reason, source, ...(move ? { move } : {}) };
+  const state: ReactionState = { reaction, timestamp: Date.now(), reason, source, ...(move ? { move } : {}), ...(mood ? { mood } : {}) };
   // Atomic via tmp + rename — torn reads on the reaction file would
   // make the Stop hook's freshness check see an absent file, pinning
   // a stale tool reaction into the bubble forever.
@@ -492,6 +495,7 @@ export interface StatusState {
   tiredSequence?: number[];
   idleSequence?: number[];
   moveSequences?: Record<string, number[]>;
+  moodColors?: Record<string, string[]>;
   sweat?: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
   level: number;
   xp: number;
@@ -536,7 +540,7 @@ export function writeStatusState(
   const safeEye = resolveEyeGlyph(companion.bones.eye);
   const artResult = getStatusFrames(companion.bones) as Partial<ReturnType<typeof Art.getStatusFrames>> &
     Pick<StatusState, "frames" | "frameSequence">;
-  const { frames, frameSequence, tiredSequence, idleSequence, moveSequences, sweat } = artResult;
+  const { frames, frameSequence, tiredSequence, idleSequence, moveSequences, moodColors, sweat } = artResult;
   const compactFrames =
     artResult.compactFrames && artResult.compactFrames.length > 0
       ? artResult.compactFrames
@@ -582,6 +586,7 @@ export function writeStatusState(
     tiredSequence,
     idleSequence,
     moveSequences,
+    moodColors,
     sweat,
     level: xpLevel,
     xp: xpTotal,

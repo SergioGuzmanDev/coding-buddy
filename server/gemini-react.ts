@@ -10,7 +10,7 @@ import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSy
 import { homedir } from "os";
 import { join } from "path";
 import type { Companion } from "../core/engine.ts";
-import { statusMoveChoices } from "./art.ts";
+import { STATUS_MOODS, statusMoveChoices } from "./art.ts";
 import { buddyStateDir } from "./path.ts";
 import { loadCompanion, loadConfig, saveReaction, sessionId } from "./state.ts";
 
@@ -123,7 +123,8 @@ export function buildPrompt(
     ...(moves.length
       ? [
           `While your reaction shows, you are drawn acting out one move: ${moves.map((m) => `${m.name} (${m.does})`).join(", ")}.`,
-          "Answer in two lines: first the name of the move, exactly as written, then the reaction. Any *action* in the reaction must be that move.",
+          `You are also colored by how you feel: ${Object.entries(STATUS_MOODS).map(([name, mood]) => `${name} (${mood.feels})`).join(", ")}, or none.`,
+          "Answer in two lines: first the move and the feeling, exactly as written, then the reaction. Any *action* in the reaction must be that move.",
           "No quotes, no preamble.",
         ]
       : ["Output only the reaction: no quotes, no preamble."]),
@@ -146,17 +147,21 @@ export function cleanReaction(raw: string): string | undefined {
 }
 
 /**
- * Splits Gemini's "move, then reaction" answer. A first line that is not one of the moves is dropped
- * rather than drawn, so an invented move never reaches the status line.
+ * Splits Gemini's "move and feeling, then reaction" answer. Words on the first line that are not a listed
+ * move or mood are dropped rather than drawn, so an invented one never reaches the status line.
  */
-export function parseAnswer(raw: string, moveNames: string[]): { reaction?: string; move?: string } {
+export function parseAnswer(raw: string, moveNames: string[]): { reaction?: string; move?: string; mood?: string } {
   const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
   if (!moveNames.length || lines.length < 2) return { reaction: cleanReaction(raw) };
-  const named = lines[0].toLowerCase().replace(/^move:\s*/, "").replace(/[^a-z]/g, "");
-  return { reaction: cleanReaction(lines.slice(1).join("\n")), move: moveNames.includes(named) ? named : undefined };
+  const words = lines[0].toLowerCase().split(/[^a-z]+/);
+  return {
+    reaction: cleanReaction(lines.slice(1).join("\n")),
+    move: words.find((w) => moveNames.includes(w)),
+    mood: words.find((w) => Object.hasOwn(STATUS_MOODS, w)),
+  };
 }
 
-type GeminiAnswer = ({ reaction: string; move?: string } | { error: string }) & { conversationId?: string };
+type GeminiAnswer = ({ reaction: string; move?: string; mood?: string } | { error: string }) & { conversationId?: string };
 
 function shorten(text: string): string {
   return text.length > MAX_ERROR_CHARS ? `${text.slice(0, MAX_ERROR_CHARS - 1).trimEnd()}…` : text;
@@ -188,8 +193,8 @@ function askGemini(bin: string, model: string, prompt: string, cwd: string, move
     return { error: shorten(firstSentence(reply.error.trim().split("\n")[0] ?? "")), conversationId };
   }
   if (result.status !== 0) return { error: stderrReason(result.stderr ?? "", result.status), conversationId };
-  const { reaction, move } = typeof reply.response === "string" ? parseAnswer(reply.response, moveNames) : {};
-  return reaction ? { reaction, move, conversationId } : { error: "empty reply", conversationId };
+  const { reaction, move, mood } = typeof reply.response === "string" ? parseAnswer(reply.response, moveNames) : {};
+  return reaction ? { reaction, move, mood, conversationId } : { error: "empty reply", conversationId };
 }
 
 /** agy keeps every print-mode run as a conversation; the buddy never resumes one, so each is deleted. */
@@ -242,7 +247,7 @@ export function reactWithGemini(
       forgetConversation(answer.conversationId, runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli"));
     }
     if ("reaction" in answer) {
-      saveReaction(answer.reaction, "turn", "gemini", answer.move);
+      saveReaction(answer.reaction, "turn", "gemini", answer.move, answer.mood);
       return answer.reaction;
     }
     error = answer.error;

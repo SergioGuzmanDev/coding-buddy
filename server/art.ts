@@ -390,6 +390,16 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
   },
 };
 
+// Gemini picks one with each reaction, and the status line paints the buddy with it while the reaction's
+// move plays. Colors take turns every two ticks; "" is the buddy's own color, so angry blinks.
+export const STATUS_MOODS: Record<string, { feels: string; colors: string[] }> = {
+  angry: { feels: "angry", colors: ["#FF5555", ""] },
+  excited: { feels: "thrilled", colors: ["#FF3232", "#FF8C00", "#FFDC00", "#32D232", "#3278FF", "#6432DC", "#B432DC"] },
+  happy: { feels: "pleased", colors: ["#FFD75F"] },
+  embarrassed: { feels: "embarrassed", colors: ["#FF87D7"] },
+  sad: { feels: "down", colors: ["#5FAFFF"] },
+};
+
 /** The moves Gemini may act out with a reaction: the pool and the celebration. */
 export function statusMoveChoices(species: Species): StatusMove[] {
   const moves = STATUS_MOVES[species];
@@ -419,6 +429,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   tiredSequence?: number[];
   idleSequence?: number[];
   moveSequences?: Record<string, number[]>;
+  moodColors?: Record<string, string[]>;
   sweat: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
 } {
   const resolveArt = (raw: string[], eyeGlyph: string): string => {
@@ -502,6 +513,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
     tiredSequence,
     idleSequence,
     moveSequences,
+    moodColors: moves ? Object.fromEntries(Object.entries(STATUS_MOODS).map(([name, mood]) => [name, mood.colors])) : undefined,
     sweat: {
       frames: sweatFrames,
       compactFrames: deriveCompactFrames(sweatFrames),

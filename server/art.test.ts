@@ -8,7 +8,7 @@
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOVES, statusMoveChoices, truncateDisplayWidth } from "./art.ts";
+import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOODS, STATUS_MOVES, statusMoveChoices, truncateDisplayWidth } from "./art.ts";
 import { SPECIES_ART as CORE_SPECIES_ART } from "../core/art-data.ts";
 import { SPECIES, EYES, type BuddyBones } from "../core/engine.ts"
 function readCodepointRanges(path: string): number[] {
@@ -211,6 +211,18 @@ describe("getStatusFrames", () => {
       expect(moveSequences![name].some((i) => frames[i].includes(mark)), name).toBe(true);
     }
     expect(moveSequences!.celebrate.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
+  });
+
+  test("every mood Gemini can pick carries hex colors, angry blinking back to the buddy's own", () => {
+    const { moodColors } = getStatusFrames(octopus);
+
+    expect(Object.keys(moodColors!).sort()).toEqual(Object.keys(STATUS_MOODS).sort());
+    for (const colors of Object.values(moodColors!)) {
+      expect(colors.length).toBeGreaterThan(0);
+      for (const color of colors) expect(color).toMatch(/^(#[0-9A-F]{6})?$/);
+    }
+    expect(moodColors!.angry).toContain("");
+    expect(new Set(moodColors!.excited).size).toBeGreaterThanOrEqual(5);
   });
 
   test("sweat adds a drop left of the eyes and a ';' to the face without resizing any frame", () => {

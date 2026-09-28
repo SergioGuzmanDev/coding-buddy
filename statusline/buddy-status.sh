@@ -387,7 +387,9 @@ fi
 
 REACTION=""
 REACTION_MOVE=""
-[ -f "$REACTION_FILE" ] && read_fields REACTION TS REACTION_MOVE < <(jq -j '(.reaction // ""), (.timestamp // 0), (.move // "") | tostring, "\u0000"' "$REACTION_FILE" 2>/dev/null)
+REACTION_MOOD=""
+[ -f "$REACTION_FILE" ] && read_fields REACTION TS REACTION_MOVE REACTION_MOOD < <(jq -j '
+    (.reaction // ""), (.timestamp // 0), (.move // ""), (.mood // "") | tostring, "\u0000"' "$REACTION_FILE" 2>/dev/null)
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
     FRESH=0
     if [ "$REACTION_TTL" -eq 0 ]; then
@@ -436,11 +438,12 @@ fi
 SINCE_REACTION=-1
 case "$TS" in
     ''|*[!0-9]*) ;;
-    *) [ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE" ] && [ $(( NOW - TS / 1000 )) -lt "$REACTION_MOVE_SECONDS" ] \
+    *) [ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE$REACTION_MOOD" ] && [ $(( NOW - TS / 1000 )) -lt "$REACTION_MOVE_SECONDS" ] \
         && SINCE_REACTION=$(( NOW - TS / 1000 )) ;;
 esac
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
-    --argjson sweat "$SWEAT" --arg reaction_move "$REACTION_MOVE" --argjson since_reaction "$SINCE_REACTION" '
+    --argjson sweat "$SWEAT" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
+    --argjson since_reaction "$SINCE_REACTION" '
     def at($sequence): $sequence[$now % ($sequence | length)];
     (if $sweat then (.sweat // {}) else {} end) as $sweat_set
     | (if $tier == "compact" then ($sweat_set.compactFrames // .compactFrames? // .frames)
@@ -451,10 +454,14 @@ FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --
        elif $move == "idle" and (.idleSequence | length) > 0 then at(.idleSequence)
        elif $move == "tired" and (.tiredSequence | length) > 0 then at(.tiredSequence)
        else at(.frameSequence) end) as $idx
+    | ((.moodColors[$reaction_mood] // []) as $mood
+       | if $since_reaction >= 0 and ($mood | length) > 0 then $mood[($since_reaction / 2 | floor) % ($mood | length)] else "" end) as $mood_color
     | ((($set[0] // .frames[0] // "") | split("\n")[0] | test("^\\s*$")) | if . then "trim" else "keep" end)
-      + "\n" + (($set[$idx] // .frames[$idx]) // "")
+      + " " + $mood_color + "\n" + (($set[$idx] // .frames[$idx]) // "")
 ' "$STATE" 2>/dev/null)
-TOP_LINE_MODE="${FRAME_OUT%%$'\n'*}"
+_frame_head="${FRAME_OUT%%$'\n'*}"
+TOP_LINE_MODE="${_frame_head%% *}"
+MOOD_COLOR="${_frame_head#* }"
 FRAME_BODY="${FRAME_OUT#*$'\n'}"
 [ "$FRAME_BODY" = "$FRAME_OUT" ] && FRAME_BODY=""
 
@@ -499,6 +506,8 @@ NAME_PAD=$(( ART_CENTER - NAME_LEN / 2 ))
 NAME_LINE="$(printf '%*s%s' "$NAME_PAD" '' "$NAME_WITH_LEVEL")"
 
 BC="${BC:-$C}"
+# The mood repaints the buddy only; the bubble keeps its color so the reaction stays readable.
+[[ "$MOOD_COLOR" =~ ^#[0-9A-Fa-f]{6}$ ]] && C=$(_hex_to_ansi "$MOOD_COLOR")
 # Italic only: faint on top of italic made the bubble text hard to read.
 ITALIC=$'\033[3m'
 if [ "$COLOR_ENABLED" -eq 0 ]; then
@@ -517,7 +526,7 @@ ALL_COLORS=()
 _arc=0
 for line in "${ART_LINES[@]}"; do
     ALL_LINES+=("$line")
-    if [ "$SHINY" = "true" ]; then
+    if [ "$SHINY" = "true" ] && [ -z "$MOOD_COLOR" ]; then
         ALL_COLORS+=("${RAINBOW[$(( (_arc + RAINBOW_OFFSET) % RAINBOW_LEN ))]}")
     else
         ALL_COLORS+=("$C")

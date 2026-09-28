@@ -124,7 +124,7 @@ describe("gemini-react", () => {
     expect(prompt.split("LATEST-ASK")).toHaveLength(2);
   });
 
-  test("stores the move Gemini acts out with its reaction, only when it is one of the octopus's moves", () => {
+  test("stores the move and mood Gemini picks with its reaction, only when they are on the lists", () => {
     saveCompanion({ ...companion, bones: { ...companion.bones, species: "octopus" } });
     const answer = (response: string) => {
       writeFileSync(join(root, "out.json"), JSON.stringify({ response }));
@@ -132,12 +132,15 @@ describe("gemini-react", () => {
       return JSON.parse(readFileSync(join(stateDir, "reaction.sessionA.json"), "utf8"));
     };
 
-    expect(answer("coffee\n*sorbe su café* bien visto")).toMatchObject({ reaction: "*sorbe su café* bien visto", move: "coffee" });
-    expect(readFileSync(join(root, "args.log"), "utf8")).toContain("coffee (sips a coffee)");
+    expect(answer("coffee happy\n*sorbe su café* bien visto")).toMatchObject({ reaction: "*sorbe su café* bien visto", move: "coffee", mood: "happy" });
+    const prompt = readFileSync(join(root, "args.log"), "utf8");
+    expect(prompt).toContain("coffee (sips a coffee)");
+    expect(prompt).toContain("angry (angry)");
 
-    const invented = answer("moonwalk\n*hace moonwalk* genial");
+    const invented = answer("moonwalk furious\n*hace moonwalk* genial");
     expect(invented.reaction).toBe("*hace moonwalk* genial");
     expect(invented.move).toBeUndefined();
+    expect(invented.mood).toBeUndefined();
   });
 
   test("tells Gemini the buddy is sweating or tired when the status line draws it that way", () => {
