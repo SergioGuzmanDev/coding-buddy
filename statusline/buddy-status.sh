@@ -421,7 +421,6 @@ fi
 REACTION_MOVE_SECONDS=30
 MOVE_AFTER_FOCUS_SECONDS=3
 BUBBLE_FOCUSED_SECONDS=15
-REOPEN_MARKER="..."
 # Under animate "focused" in iTerm2 a reaction waits to be looked at: its bubble, move and mood last
 # BUBBLE_FOCUSED_SECONDS from 3 s of focus, then the bubble closes, reopenable until the next reaction.
 GATED=0
@@ -462,7 +461,6 @@ _reaction_gate() {
 
 BUBBLE_CLOSED=0
 BUBBLE_COUNTDOWN=0
-REOPEN_LINK=0
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
     FRESH=0
     if [ "$GATED" -eq 1 ]; then
@@ -492,13 +490,11 @@ if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; the
         rm -f "$REACTION_FILE" 2>/dev/null
     fi
 fi
-# The marker needs the coding-buddy:// handler app, and a session id that is safe inside its link.
+# A closed bubble reopens from the name, so its link carries a session id that must be safe inside a URL.
+REOPEN_URL=""
 if [ "$BUBBLE_CLOSED" -eq 1 ]; then
     REACTION=""
-    if [ "$CLICK_TO_EXPAND" -eq 1 ] && [ -z "$BUBBLE" ] && [[ "$SID" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
-        BUBBLE="\"${REOPEN_MARKER}\""
-        REOPEN_LINK=1
-    fi
+    [ "$CLICK_TO_EXPAND" -eq 1 ] && [[ "$SID" =~ ^[A-Za-z0-9_-]{1,64}$ ]] && REOPEN_URL="coding-buddy://reopen/$SID"
 fi
 
 # ─── Animation: pick current density frame from server-rendered frames ───────
@@ -610,12 +606,14 @@ BC="${BC:-$C}"
 [[ "$MOOD_COLOR" =~ ^#[0-9A-Fa-f]{6}$ ]] && _hex_to_ansi C "$MOOD_COLOR"
 # Italic only: faint on top of italic made the bubble text hard to read.
 ITALIC=$'\033[3m'
+FAINT=$'\033[2m'
 if [ "$COLOR_ENABLED" -eq 0 ]; then
     C=""
     BC=""
     NC=""
     NEUTRAL=""
     ITALIC=""
+    FAINT=""
     for _rainbow_index in "${!RAINBOW[@]}"; do
         RAINBOW[$_rainbow_index]=""
     done
@@ -766,14 +764,15 @@ SUBSTATUS_SINGLE=0
 WORDS=()
 [ -n "$BUBBLE_TEXT" ] && read -r -a WORDS <<< "$BUBBLE_TEXT"
 _widths=()
-IFS=$'\n' read -r -d '' -a _widths < <(dwidths "$NAME_WITH_LEVEL" "$NAME_LINE" "$SUBSTATUS_PLAIN" \
+IFS=$'\n' read -r -d '' -a _widths < <(dwidths "$NAME_WITH_LEVEL" "$NAME_LINE" "$SUBSTATUS_PLAIN" "$NAME" \
     "${ART_LINES[@]}" ${WORDS[@]+"${WORDS[@]}"})
 LABEL_W="${_widths[0]}"
 NAME_LINE_W="${_widths[1]}"
 SUBSTATUS_LEFT_W="${_widths[2]}"
-WORD_WIDTHS=(${_widths[@]:$(( 3 + ${#ART_LINES[@]} ))})
+NAME_W="${_widths[3]}"
+WORD_WIDTHS=(${_widths[@]:$(( 4 + ${#ART_LINES[@]} ))})
 ART_W=0
-for line_w in "${_widths[@]:3:${#ART_LINES[@]}}"; do
+for line_w in "${_widths[@]:4:${#ART_LINES[@]}}"; do
     [ "$line_w" -gt "$ART_W" ] && ART_W="$line_w"
 done
 
@@ -860,7 +859,6 @@ TAIL_W=3
 MAX_INNER=$(( COLS - ART_W - TAIL_W - 4 - MARGIN ))
 if [ -n "$BUBBLE" ] && [ "$MAX_INNER" -ge "$MIN_BUBBLE_INNER" ] 2>/dev/null; then
     [ "$INNER_W" -gt "$MAX_INNER" ] && INNER_W="$MAX_INNER"
-    [ "$REOPEN_LINK" -eq 1 ] && INNER_W=${#REOPEN_MARKER}
 else
     BUBBLE=""
     BUBBLE_TEXT=""
@@ -917,9 +915,6 @@ if [ -n "$SLIM" ] && [ "${#TEXT_LINES[@]}" -gt 0 ]; then
 fi
 
 TEXT_COUNT=${#TEXT_LINES[@]}
-# cmd+click on the closed bubble opens coding-buddy://reopen/<sid>, routed to reopen-bubble.sh.
-[ "$REOPEN_LINK" -eq 1 ] && [ "$TEXT_COUNT" -eq 1 ] \
-    && TEXT_LINES[0]=$'\033]8;;coding-buddy://reopen/'"$SID"$'\033\\'"${TEXT_LINES[0]}"$'\033]8;;\033\\'
 
 # Build box as plain strings (no ANSI). Color applied at output time.
 # Box display width = INNER_W + 4:  "| " + text(INNER_W) + " |"
@@ -1179,12 +1174,19 @@ inline_substatus_row() {
     printf '%s%*s%s%s%s%s%s' "$left" $(( room - buddy_w + 2 )) '' "$C" "$buddy" "$BC" "$reaction_part" "$NC"
 }
 
-# Keeps the name in its column of the panel's last row, with the sub-status on its left.
+# Keeps the name in its column of the panel's last row, with the sub-status on its left. The slim layouts have
+# no name row, so the name stands at a fixed column before the feet, in room the sub-status does not need.
 inline_name_row() {
     [ "$SUBSTATUS_SINGLE" -eq 1 ] || return 0
-    local pad=$(( COLS - ART_W - SUBSTATUS_LEFT_W ))
+    local pad=$(( COLS - ART_W - SUBSTATUS_LEFT_W )) name=""
     [ "$pad" -ge 2 ] || return 0
-    printf '%s%*s%s' "$SUBSTATUS_LEFT" "$pad" '' "${ALL_COLORS[$(( ART_COUNT - 1 ))]}${ALL_LINES[$(( ART_COUNT - 1 ))]}${NC}"
+    if [ -n "$SLIM" ] && [ -n "$NAME" ] && [ "$pad" -ge $(( NAME_W + 3 )) ]; then
+        name="${FAINT}${NAME}${NC}"
+        [ -n "$REOPEN_URL" ] && name=$'\033]8;;'"$REOPEN_URL"$'\033\\'"$name"$'\033]8;;\033\\'
+        name="$name "
+        pad=$(( pad - NAME_W - 1 ))
+    fi
+    printf '%s%*s%s%s' "$SUBSTATUS_LEFT" "$pad" '' "$name" "${ALL_COLORS[$(( ART_COUNT - 1 ))]}${ALL_LINES[$(( ART_COUNT - 1 ))]}${NC}"
 }
 
 if [ "$SUBSTATUS_INLINE" -eq 1 ]; then
@@ -1199,10 +1201,10 @@ if [ "$SUBSTATUS_INLINE" -eq 1 ]; then
     fi
 fi
 
-# cmd+click on the name opens coding-buddy://toggle, which the URL handler from
-# scripts/macos/install-click-toggle.sh routes to toggle-expanded.sh.
+# cmd+click on the name opens coding-buddy://toggle, or reopens a closed bubble; the URL handler from
+# scripts/macos/install-click-toggle.sh routes both.
 if [ "$CLICK_TO_EXPAND" -eq 1 ] && [ -n "$NAME_WITH_LEVEL" ]; then
-    _name_link=$'\033]8;;coding-buddy://toggle\033\\'"${NAME_WITH_LEVEL}"$'\033]8;;\033\\'
+    _name_link=$'\033]8;;'"${REOPEN_URL:-coding-buddy://toggle}"$'\033\\'"${NAME_WITH_LEVEL}"$'\033]8;;\033\\'
     for _i in "${!OUTPUT_LINES[@]}"; do
         _row="${OUTPUT_LINES[$_i]}"
         case "$_row" in

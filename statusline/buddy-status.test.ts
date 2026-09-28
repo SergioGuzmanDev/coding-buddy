@@ -754,7 +754,7 @@ describe("buddy sub-status cache", () => {
     describe("under animate focused, the bubble, move and mood last 15 seconds from 3 seconds of focus after the reaction", () => {
       const clock = Math.floor(Date.now() / 1000);
       const red = "\x1b[38;2;255;0;0m";
-      const reopenLink = "\x1b]8;;coding-buddy://reopen/default\x1b\\...\x1b]8;;\x1b\\";
+      const reopenLink = /\x1b\]8;;coding-buddy:\/\/reopen\/default\x1b\\(?:\x1b\[2m)?Nimbus/;
       const setup = (config: Record<string, unknown> = {}) => {
         const made = fixture({ moveSequences: { coffee: [3, 1] }, moodColors: { angry: ["#FF0000"] } }, { animate: "focused", ...config });
         const reaction = join(made.stateDir, "reaction.default.json");
@@ -834,7 +834,7 @@ describe("buddy sub-status cache", () => {
         expect(existsSync(gate)).toBe(false);
       });
 
-      test("a closed bubble outlives reactionTTL, and leaves no marker without clickToExpand", () => {
+      test("a closed bubble outlives reactionTTL, and leaves no reopen link without clickToExpand", () => {
         const { reaction, focus, react, tick, touch } = setup({ reactionTTL: 30 });
         react(5000);
         touch(focus, -6000);
@@ -846,19 +846,22 @@ describe("buddy sub-status cache", () => {
         expect(existsSync(reaction)).toBe(true);
       });
 
-      test("with clickToExpand the closed bubble shrinks to a marker linked to coding-buddy://reopen/<sid>, in every full layout", () => {
-        const box = { classic: [".-----.", "`-----'"], bubble: [".-----.", "'-----'"], tight: [`(\x1b[3m ${reopenLink} \x1b[0m`] };
-        for (const [layout, marks] of Object.entries(box)) {
-          const { reaction, focus, react, tick, touch } = setup({ clickToExpand: true, slim: layout === "classic" ? false : layout });
+      test("with clickToExpand a closed bubble reopens from the name: on its own row in the classic layout, on the feet row in the slim ones", () => {
+        for (const slim of [false, "bubble", "tight"]) {
+          const { stateDir, reaction, focus, react, tick, touch } = setup({
+            clickToExpand: true, slim, subStatusInline: true, subStatusCommand: "printf ignored",
+          });
+          writeFileSync(join(stateDir, ".substatus.default"), "LEFT-SIDE-STATUS\n");
           react(5000);
           touch(reaction, -5000);
           touch(focus, -1);
 
-          expect(tick(0)).not.toContain("coding-buddy://reopen");
+          const open = tick(0);
+          expect(open).toContain("*sorbe*");
+          expect(open).not.toContain("coding-buddy://reopen");
           const closed = tick(20);
-          expect(closed).toContain(reopenLink);
+          expect(closed).toMatch(reopenLink);
           expect(closed).not.toContain("*sorbe*");
-          for (const mark of marks) expect(closed).toContain(mark);
         }
       });
 
@@ -871,7 +874,7 @@ describe("buddy sub-status cache", () => {
         tick(0);
         expect(tick(1, "w0t0p0:AAA")).toContain("*sorbe*");
         expect(existsSync(cache)).toBe(false);
-        expect(tick(15, "w0t0p0:AAA")).toContain(reopenLink);
+        expect(tick(15, "w0t0p0:AAA")).toMatch(reopenLink);
         expect(existsSync(cache)).toBe(true);
       });
 
@@ -882,7 +885,7 @@ describe("buddy sub-status cache", () => {
         touch(join(stateDir, "config.json"), -100);
         tick(-20);
         tick(-17);
-        expect(tick(-1, "w0t0p0:AAA")).toContain(reopenLink);
+        expect(tick(-1, "w0t0p0:AAA")).toMatch(reopenLink);
         touch(cache, -1);
 
         expect(reopen().status).toBe(0);
@@ -892,7 +895,7 @@ describe("buddy sub-status cache", () => {
         expect(replay).toContain("*sorbe*");
         expect(replay).toContain("art-cheer");
         expect(replay).toContain(red);
-        expect(tick(now + 15)).toContain(reopenLink);
+        expect(tick(now + 15)).toMatch(reopenLink);
       });
 
       test("a reopened reaction without a move or mood just shows its bubble", () => {
@@ -900,7 +903,7 @@ describe("buddy sub-status cache", () => {
         react(100, {});
         touch(reaction, -100);
         tick(-20);
-        expect(tick(-2)).toContain(reopenLink);
+        expect(tick(-2)).toMatch(reopenLink);
 
         reopen();
         const now = Number(readFileSync(gate, "utf8").split("\n")[1]) - clock;
@@ -1149,7 +1152,7 @@ describe("buddy sub-status cache", () => {
 describe("slim layout", () => {
   const octopus = ["            \n   .----.   \n  ( o  o )  \n  (______)  \n  TENTACLES "];
 
-  function render(config: Record<string, unknown>, reaction: string) {
+  function render(config: Record<string, unknown>, reaction: string, subStatus = "LEFT-SIDE-STATUS") {
     const { configDir, stateDir } = createStatuslineFixture({
       subStatusInline: true,
       expanded: true,
@@ -1160,8 +1163,8 @@ describe("slim layout", () => {
     });
     const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
     writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, level: 3, frames: octopus }));
-    writeFileSync(join(stateDir, ".substatus.default"), "LEFT-SIDE-STATUS\n");
-    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction, timestamp: Date.now() }));
+    writeFileSync(join(stateDir, ".substatus.default"), `${subStatus}\n`);
+    if (reaction) writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction, timestamp: Date.now() }));
     const raw = runStatusline(configDir, "{}\n", "150").stdout.toString();
     return { raw, plain: raw.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split("\n").filter(Boolean) };
   }
@@ -1174,7 +1177,7 @@ describe("slim layout", () => {
     expect(plain).toHaveLength(4);
     expect(plain.at(-1)).toStartWith("LEFT-SIDE-STATUS");
     expect(plain.at(-1)).toContain("TENTACLES");
-    expect(raw).not.toContain("Nimbus");
+    expect(plain.slice(0, -1).join("\n")).not.toContain("Nimbus");
     expect(raw).not.toContain("coding-buddy://toggle");
     for (const word of reaction.split(" ")) expect(plain.join(" ")).toContain(word);
     expect(plain[0]).toContain("/ *Toma");
@@ -1201,8 +1204,27 @@ describe("slim layout", () => {
     expect(plain[2]).toContain("|--");
     expect(plain[2]).toContain("( o  o )");
     expect(plain.at(-1)).toStartWith("LEFT-SIDE-STATUS");
-    expect(raw).not.toContain("Nimbus");
+    expect(plain.slice(0, -1).join("\n")).not.toContain("Nimbus");
     for (const word of reaction.split(" ")) expect(plain.join(" ")).toContain(word);
+  });
+
+  test("puts the name, faint and unlinked, on the feet row at a fixed column before the art, bubble open or not", () => {
+    for (const reaction of ["hola", ""]) {
+      const { raw, plain } = render({}, reaction);
+
+      expect(plain.at(-1)).toMatch(/^LEFT-SIDE-STATUS +Nimbus {3}TENTACLES/);
+      expect(raw).toContain("\x1b[2mNimbus\x1b[0m");
+      expect(raw).not.toContain("coding-buddy://");
+    }
+  });
+
+  test("drops the name rather than cut the sub-status when the feet row is short", () => {
+    const artColumn = render({}, "").plain.at(-1)!.indexOf("TENTACLES") - "  ".length;
+    const status = "S".repeat(artColumn - "Nimbus".length);
+    const { plain } = render({}, "", status);
+
+    expect(plain.at(-1)).toMatch(new RegExp(`^${status} +TENTACLES`));
+    expect(plain.join("\n")).not.toContain("Nimbus");
   });
 
   test("bubble stays as tall as the art for a reaction that fits on one line", () => {
