@@ -14,7 +14,6 @@ import { STATUS_MOODS, statusMoveChoices } from "./art.ts";
 import { buddyStateDir } from "./path.ts";
 import { loadCompanion, loadConfig, saveReaction, sessionId } from "./state.ts";
 
-const MAX_REACTION_CHARS = 150;
 const FAILURE_BACKOFF_MS = 10 * 60_000;
 const GEMINI_TIMEOUT_MS = 60_000;
 const TRANSCRIPT_TAIL_BYTES = 512 * 1024;
@@ -117,14 +116,14 @@ export function buildPrompt(
     ...(look.sweating ? ["You are sweating: the conversation's context window is filling up."] : []),
     ...(look.tired ? ["You are tired: most of the developer's 5-hour usage limit is spent."] : []),
     "",
-    "Write ONE in-character reaction to the latest exchange below, under 120 characters.",
+    "Write ONE in-character reaction to the latest exchange below.",
     "Point at something specific from it: a pitfall, a win, a risk, a pattern. Use the earlier conversation only to understand it.",
     "Use *asterisks* for physical actions. Write in the developer's language.",
     ...(moves.length
       ? [
           `While your reaction shows, you are drawn acting out one move: ${moves.map((m) => `${m.name} (${m.does})`).join(", ")}.`,
           `You are also colored by how you feel: ${Object.entries(STATUS_MOODS).map(([name, mood]) => `${name} (${mood.feels})`).join(", ")}, or none.`,
-          "Answer in two lines: first the move and the feeling, exactly as written, then the reaction. Any *action* in the reaction must be that move.",
+          "Put the move and the feeling on the first line, exactly as written, then the reaction. Any *action* in the reaction must be that move.",
           "No quotes, no preamble.",
         ]
       : ["Output only the reaction: no quotes, no preamble."]),
@@ -142,8 +141,7 @@ export function buildPrompt(
 export function cleanReaction(raw: string): string | undefined {
   const line = raw.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
   const text = line.replace(/^["'`“”«»]+|["'`“”«»]+$/g, "").trim();
-  if (!text) return undefined;
-  return text.length > MAX_REACTION_CHARS ? `${text.slice(0, MAX_REACTION_CHARS - 1).trimEnd()}…` : text;
+  return text || undefined;
 }
 
 /**
@@ -155,7 +153,7 @@ export function parseAnswer(raw: string, moveNames: string[]): { reaction?: stri
   if (!moveNames.length || lines.length < 2) return { reaction: cleanReaction(raw) };
   const words = lines[0].toLowerCase().split(/[^a-z]+/);
   return {
-    reaction: cleanReaction(lines.slice(1).join("\n")),
+    reaction: cleanReaction(lines.slice(1).join(" ")),
     move: words.find((w) => moveNames.includes(w)),
     mood: words.find((w) => Object.hasOwn(STATUS_MOODS, w)),
   };
