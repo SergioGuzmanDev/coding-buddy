@@ -95,7 +95,7 @@ _config_path="$CONFIG_FILE"
 [ -f "$_config_path" ] || _config_path=/dev/null
 _reaction_path="$REACTION_FILE"
 [ -f "$_reaction_path" ] || _reaction_path=/dev/null
-read_fields MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD \
+read_fields EPOCH_NOW MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD \
     TRANSCRIPT CONTEXT_PCT USAGE_5H_PCT \
     _cfg_theme _cfg_animate _color _bubble_color _cfg_hide_rarity _custom _cfg_inline _cfg_expanded \
     _cfg_click _ttl _bw _bm _wa _density _cfg_slim SUBSTATUS_COMMAND SUBSTATUS_REFRESH_SECONDS \
@@ -104,7 +104,7 @@ read_fields MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD 
     def pct: if type == "number" then floor else 0 end;
     def object($raw): (try ($raw | fromjson) catch null) | if type == "object" then . else null end;
     object($config) as $c | object($reaction) as $r
-    | (.muted // false), (.name // ""), (.rarity // "common"), (.stars // ""), (.shiny // false),
+    | (now | floor), (.muted // false), (.name // ""), (.rarity // "common"), (.stars // ""), (.shiny // false),
     (.achievement // ""), (if has("achievementAt") then (.achievementAt // 0) else "absent" end),
     ((try ($xp | fromjson | .level) catch null) // .level // 1), (.mood // "focused"),
     (try ($input | fromjson | [(.transcript_path // ""), (.context_window.used_percentage | pct),
@@ -120,8 +120,8 @@ read_fields MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD 
 [ -z "$NAME" ] && exit 0
 
 # ─── Animation timing ───────────────────────────────────────────────────────
-# The only date call: real-time checks (expiry, freshness) use EPOCH_NOW, the animation uses NOW.
-EPOCH_NOW=$(date +%s)
+# EPOCH_NOW comes from the jq above, so no date runs: real-time checks (expiry, freshness) use it, the
+# animation uses NOW.
 NOW=${BUDDY_FAKE_NOW:-$EPOCH_NOW}
 # The actual frame body is selected later once density/rows are known.
 
