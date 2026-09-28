@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Registers coding-buddy:// with macOS: cmd+clicking the buddy's name runs toggle-expanded.sh, and its
-# closed bubble reopen-bubble.sh.
+# Registers coding-buddy:// with macOS: cmd+clicking the buddy's name runs toggle-expanded.sh, or
+# bubble-click.sh while a reaction's bubble can be closed or reopened.
 set -euo pipefail
 
 app="$HOME/Applications/Coding Buddy Toggle.app"
 toggle="${1:-$HOME/.claude-buddy/app/statusline/toggle-expanded.sh}"
-reopen="$(dirname "$toggle")/reopen-bubble.sh"
+bubble_click="$(dirname "$toggle")/bubble-click.sh"
 plist="$app/Contents/Info.plist"
 source_file=$(mktemp -t coding-buddy-toggle)
 
-# Any web page can open coding-buddy:// links: the URL only picks a script, and reopen-bubble.sh gets
+# Any web page can open coding-buddy:// links: the URL only picks a script, and bubble-click.sh gets
 # it as one quoted argument to validate.
 cat > "$source_file" <<EOF
 on open location theURL
 	if theURL is "coding-buddy://toggle" then
 		do shell script "/bin/bash " & quoted form of "$toggle"
-	else if theURL starts with "coding-buddy://reopen/" then
-		do shell script "/bin/bash " & quoted form of "$reopen" & " " & quoted form of theURL
+	else if theURL starts with "coding-buddy://reopen/" or theURL starts with "coding-buddy://close/" then
+		do shell script "/bin/bash " & quoted form of "$bubble_click" & " " & quoted form of theURL
 	end if
 end open location
 EOF

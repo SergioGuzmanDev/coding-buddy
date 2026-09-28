@@ -755,8 +755,9 @@ describe("buddy sub-status cache", () => {
       const clock = Math.floor(Date.now() / 1000);
       const red = "\x1b[38;2;255;0;0m";
       const reopenLink = /\x1b\]8;;coding-buddy:\/\/reopen\/default\x1b\\(?:\x1b\[2m)?Nimbus/;
-      const setup = (config: Record<string, unknown> = {}) => {
-        const made = fixture({ moveSequences: { coffee: [3, 1] }, moodColors: { angry: ["#FF0000"] } }, { animate: "focused", ...config });
+      const closeLink = /\x1b\]8;;coding-buddy:\/\/close\/default\x1b\\(?:\x1b\[2m)?Nimbus/;
+      const setup = (config: Record<string, unknown> = {}, status: Record<string, unknown> = {}) => {
+        const made = fixture({ moveSequences: { coffee: [3, 1] }, moodColors: { angry: ["#FF0000"] }, ...status }, { animate: "focused", ...config });
         const reaction = join(made.stateDir, "reaction.default.json");
         const focus = join(made.stateDir, "focused-session");
         const gate = join(made.stateDir, ".move_gate.default");
@@ -768,7 +769,7 @@ describe("buddy sub-status cache", () => {
           render(made.configDir, {}, { BUDDY_FAKE_NOW: String(clock + seconds), ITERM_SESSION_ID: session });
         const touch = (path: string, seconds: number) => utimesSync(path, clock + seconds, clock + seconds);
         const reopen = (url = "coding-buddy://reopen/default", env: Record<string, string> = {}) =>
-          spawnSync("/bin/bash", [join(import.meta.dir, "reopen-bubble.sh"), url], {
+          spawnSync("/bin/bash", [join(import.meta.dir, "bubble-click.sh"), url], {
             env: { ...process.env, CLAUDE_CONFIG_DIR: made.configDir, CLAUDE_CODE_SESSION_ID: "", TMUX_PANE: "", ...env },
           });
         return { ...made, reaction, focus, gate, cache, react, tick, touch, reopen };
@@ -846,7 +847,7 @@ describe("buddy sub-status cache", () => {
         expect(existsSync(reaction)).toBe(true);
       });
 
-      test("with clickToExpand a closed bubble reopens from the name: on its own row in the classic layout, on the feet row in the slim ones", () => {
+      test("with clickToExpand the name closes an open bubble and reopens a closed one: on its own row in the classic layout, on the feet row in the slim ones", () => {
         for (const slim of [false, "bubble", "tight"]) {
           const { stateDir, reaction, focus, react, tick, touch } = setup({
             clickToExpand: true, slim, subStatusInline: true, subStatusCommand: "printf ignored",
@@ -858,6 +859,7 @@ describe("buddy sub-status cache", () => {
 
           const open = tick(0);
           expect(open).toContain("*sorbe*");
+          expect(open).toMatch(closeLink);
           expect(open).not.toContain("coding-buddy://reopen");
           const closed = tick(20);
           expect(closed).toMatch(reopenLink);
@@ -898,6 +900,60 @@ describe("buddy sub-status cache", () => {
         expect(tick(now + 15)).toMatch(reopenLink);
       });
 
+      test("closing an open bubble hides it at once and stops its move and mood, in an unfocused tab too", () => {
+        const { reaction, focus, react, tick, touch, reopen } = setup({ clickToExpand: true });
+        react(1);
+        touch(focus, -100);
+        touch(reaction, -1);
+        expect(tick(2)).toContain(red);
+
+        expect(reopen("coding-buddy://close/default").status).toBe(0);
+        expect(tick(5, "w0t0p0:AAA")).not.toContain("*sorbe*");
+        const closed = tick(5);
+        expect(closed).not.toContain("*sorbe*");
+        expect(closed).toContain("art-rest");
+        expect(closed).not.toContain(red);
+        expect(closed).toMatch(reopenLink);
+      });
+
+      test("a move the loop schedules plays over a replayed reaction, never over its first play", () => {
+        const { reaction, focus, gate, react, tick, touch, reopen } = setup(
+          { clickToExpand: true },
+          { frameSequence: [2], moveSequences: { coffee: [3, 1], stretch: [2] } },
+        );
+        react(1);
+        touch(focus, -100);
+        touch(reaction, -1);
+        expect(tick(2)).toContain("art-cheer");
+        expect(tick(20)).toContain("art-asleep");
+
+        reopen();
+        const now = Number(readFileSync(gate, "utf8").split("\n")[1]) - clock;
+        const replay = tick(now);
+        expect(replay).toContain("*sorbe*");
+        expect(replay).toContain("art-asleep");
+        expect(replay).toContain(red);
+      });
+
+      test("a new reaction during a replay plays its own move once focused for 3 seconds", () => {
+        const { reaction, focus, gate, react, tick, touch, reopen } = setup(
+          { clickToExpand: true },
+          { moveSequences: { coffee: [3, 1], stretch: [2] } },
+        );
+        react(100);
+        touch(reaction, -100);
+        touch(focus, -200);
+        tick(-20);
+        reopen();
+        const now = Number(readFileSync(gate, "utf8").split("\n")[1]) - clock;
+        expect(tick(now)).toContain("art-cheer");
+
+        react(-(now + 1), { move: "stretch" });
+        touch(reaction, now + 1);
+        expect(tick(now + 2)).toContain("art-rest");
+        expect(tick(now + 4)).toContain("art-asleep");
+      });
+
       test("a reopened reaction without a move or mood just shows its bubble", () => {
         const { reaction, gate, react, tick, touch, reopen } = setup({ clickToExpand: true });
         react(100, {});
@@ -931,6 +987,9 @@ describe("buddy sub-status cache", () => {
           `coding-buddy://reopen/$(touch ${pwned})`,
           "coding-buddy://reopen/default\n",
           "coding-buddy://reopen/nosuchsid",
+          "coding-buddy://close/../default",
+          `coding-buddy://close/default;touch ${pwned}`,
+          "coding-buddy://closed/default",
           "http://reopen/default",
         ]) {
           expect(reopen(url).status).toBe(0);
@@ -942,7 +1001,9 @@ describe("buddy sub-status cache", () => {
         expect(readdirSync(join(stateDir, ".move_gate.a"))).toEqual([]);
 
         reopen();
-        expect(readFileSync(gate, "utf8")).toMatch(new RegExp(`^${(clock - 100) * 1000}\n\\d+\nopen\n$`));
+        expect(readFileSync(gate, "utf8")).toMatch(new RegExp(`^${(clock - 100) * 1000}\n\\d+\nreplay\n$`));
+        reopen("coding-buddy://close/default");
+        expect(readFileSync(gate, "utf8")).toBe(`${(clock - 100) * 1000}\n0\nopen\n`);
       });
 
       test("a closed bubble's text leaves the one-line minimal tier too", () => {

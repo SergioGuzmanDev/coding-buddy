@@ -429,7 +429,7 @@ GATED=0
 
 # Sets _move_from to when the reaction's bubble, move and mood started counting BUBBLE_FOCUSED_SECONDS,
 # or -1 while it waits for MOVE_AFTER_FOCUS_SECONDS of focus. The gate file holds the reaction, the second
-# it counts from (focus start while waiting, window start once open) and the state; reopen-bubble.sh
+# it counts from (focus start while waiting, window start once open) and the state; bubble-click.sh
 # writes it open. focused-session is rewritten on every focus change, so a copy newer than the gate file
 # means focus went away since the gate last recorded where it started. Only a focused session advances it.
 _reaction_gate() {
@@ -438,8 +438,9 @@ _reaction_gate() {
     [ -f "$gate_file" ] && { IFS= read -r gate_ts; IFS= read -r gate_at; IFS= read -r gate_state; } < "$gate_file"
     case "$gate_at" in ''|*[!0-9]*) gate_ts="" ;; esac
     _move_from=-1
-    if [ "$gate_ts" = "$TS" ] && [ "$gate_state" = open ]; then
+    if [ "$gate_ts" = "$TS" ] && { [ "$gate_state" = open ] || [ "$gate_state" = replay ]; }; then
         _move_from=$gate_at
+        [ "$gate_state" = replay ] && REPLAY=true
         return
     fi
     [ "$ANIMATE" -eq 1 ] || return 0
@@ -461,6 +462,7 @@ _reaction_gate() {
 
 BUBBLE_CLOSED=0
 BUBBLE_COUNTDOWN=0
+REPLAY=false
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
     FRESH=0
     if [ "$GATED" -eq 1 ]; then
@@ -490,11 +492,12 @@ if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; the
         rm -f "$REACTION_FILE" 2>/dev/null
     fi
 fi
-# A closed bubble reopens from the name, so its link carries a session id that must be safe inside a URL.
-REOPEN_URL=""
-if [ "$BUBBLE_CLOSED" -eq 1 ]; then
-    REACTION=""
-    [ "$CLICK_TO_EXPAND" -eq 1 ] && [[ "$SID" =~ ^[A-Za-z0-9_-]{1,64}$ ]] && REOPEN_URL="coding-buddy://reopen/$SID"
+[ "$BUBBLE_CLOSED" -eq 1 ] && REACTION=""
+# The name closes the bubble or reopens it, so its link carries a session id that must be safe inside a URL.
+BUBBLE_URL=""
+if [ "$GATED" -eq 1 ] && [ "$CLICK_TO_EXPAND" -eq 1 ] && [[ "$SID" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+    BUBBLE_URL="coding-buddy://close/$SID"
+    [ "$BUBBLE_CLOSED" -eq 1 ] && BUBBLE_URL="coding-buddy://reopen/$SID"
 fi
 
 # ─── Animation: pick current density frame from server-rendered frames ───────
@@ -536,19 +539,22 @@ fi
 # The drop comes and goes while sweating. A frozen status line has no clock to blink by, so it keeps it.
 SWEAT_DRAWN=false
 [ "$SWEAT" = true ] && [ $(( (ANIMATE ? NOW : 0) % SWEAT_EVERY_SECONDS )) -lt "$SWEAT_SHOWN_SECONDS" ] && SWEAT_DRAWN=true
+# A reopened bubble replays its move only between the moves the loop has scheduled; a first play holds them off.
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
     --argjson sweat "$SWEAT_DRAWN" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
-    --argjson since_reaction "$SINCE_REACTION" '
+    --argjson since_reaction "$SINCE_REACTION" --argjson replay "$REPLAY" '
     def at($sequence): $sequence[$now % ($sequence | length)];
     (if $sweat then (.sweat // {}) else {} end) as $sweat_set
     | (if $tier == "compact" then ($sweat_set.compactFrames // .compactFrames? // .frames)
      elif $tier == "minimal" then ($sweat_set.minimalFrames // .minimalFrames? // .frames)
      else ($sweat_set.frames // .frames) end) as $set
-    | (if $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0
-           then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
-       elif $move == "idle" and (.idleSequence | length) > 0 then at(.idleSequence)
+    | (if $move == "idle" and (.idleSequence | length) > 0 then at(.idleSequence)
        elif $move == "tired" and (.tiredSequence | length) > 0 then at(.tiredSequence)
-       else at(.frameSequence) end) as $idx
+       else at(.frameSequence) end) as $scheduled
+    | (if $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0
+          and (($replay and ([.moveSequences[][]] | index($scheduled))) | not)
+           then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
+       else $scheduled end) as $idx
     | ((.moodColors[$reaction_mood] // []) as $mood
        | if $since_reaction >= 0 and ($mood | length) > 0 then $mood[($since_reaction / 2 | floor) % ($mood | length)] else "" end) as $mood_color
     | ((($set[0] // .frames[0] // "") | split("\n")[0] | test("^\\s*$")) | if . then "trim" else "keep" end)
@@ -1182,7 +1188,7 @@ inline_name_row() {
     [ "$pad" -ge 2 ] || return 0
     if [ -n "$SLIM" ] && [ -n "$NAME" ] && [ "$pad" -ge $(( NAME_W + 3 )) ]; then
         name="${FAINT}${NAME}${NC}"
-        [ -n "$REOPEN_URL" ] && name=$'\033]8;;'"$REOPEN_URL"$'\033\\'"$name"$'\033]8;;\033\\'
+        [ -n "$BUBBLE_URL" ] && name=$'\033]8;;'"$BUBBLE_URL"$'\033\\'"$name"$'\033]8;;\033\\'
         name="$name "
         pad=$(( pad - NAME_W - 1 ))
     fi
@@ -1201,10 +1207,10 @@ if [ "$SUBSTATUS_INLINE" -eq 1 ]; then
     fi
 fi
 
-# cmd+click on the name opens coding-buddy://toggle, or reopens a closed bubble; the URL handler from
+# cmd+click on the name opens coding-buddy://toggle, or closes or reopens the bubble; the URL handler from
 # scripts/macos/install-click-toggle.sh routes both.
 if [ "$CLICK_TO_EXPAND" -eq 1 ] && [ -n "$NAME_WITH_LEVEL" ]; then
-    _name_link=$'\033]8;;'"${REOPEN_URL:-coding-buddy://toggle}"$'\033\\'"${NAME_WITH_LEVEL}"$'\033]8;;\033\\'
+    _name_link=$'\033]8;;'"${BUBBLE_URL:-coding-buddy://toggle}"$'\033\\'"${NAME_WITH_LEVEL}"$'\033]8;;\033\\'
     for _i in "${!OUTPUT_LINES[@]}"; do
         _row="${OUTPUT_LINES[$_i]}"
         case "$_row" in
