@@ -112,6 +112,26 @@ function sweatLine(contextPct: number): string {
   return "You are sweating: the conversation's context window is nearly full.";
 }
 
+function worryLevel(look: BuddyLook): number {
+  if (!look.sweating) return 0;
+  return look.contextPct < 50 ? 1 : look.contextPct < 60 ? 2 : 3;
+}
+
+// Told on every turn, Gemini brought the context up in every reaction, so it hears once per level it rises to.
+function lookToTell(stateDir: string): BuddyLook {
+  const look = readBuddyLook(stateDir);
+  const toldFile = join(stateDir, `.worry_told.${sessionId()}`);
+  let told = 0;
+  try {
+    told = Number(readFileSync(toldFile, "utf8")) || 0;
+  } catch {
+    // Nothing told yet in this session.
+  }
+  const worry = worryLevel(look);
+  if (worry !== told) writeFileSync(toldFile, String(worry));
+  return worry > told ? look : { ...look, sweating: false };
+}
+
 export function buildPrompt(
   companion: Companion,
   assistantMessage: string,
@@ -292,7 +312,7 @@ export function reactWithGemini(
     const earlier = runtime.transcriptPath
       ? earlierConversation(runtime.transcriptPath, [assistantMessage, userMessage])
       : "";
-    const prompt = buildPrompt(companion, assistantMessage, userMessage, earlier, readBuddyLook(stateDir));
+    const prompt = buildPrompt(companion, assistantMessage, userMessage, earlier, lookToTell(stateDir));
     const moveNames = statusMoveChoices(companion.bones.species).map((m) => m.name);
     // agy keeps a ~25 KB log of every run in its own log directory and never deletes it; only the last one is kept here.
     const logFile = join(stateDir, ".gemini_last.log");

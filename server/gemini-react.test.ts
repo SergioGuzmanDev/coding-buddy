@@ -189,11 +189,30 @@ describe("gemini-react", () => {
       return readFileSync(join(root, "args.log"), "utf8");
     };
 
-    expect(prompt(45)).toContain("slightly uneasy");
-    expect(prompt(45)).not.toMatch(/nervous|sweating/);
-    expect(prompt(59)).toContain("a bit nervous");
-    expect(prompt(59)).not.toContain("You are sweating");
+    const uneasy = prompt(45);
+    expect(uneasy).toContain("slightly uneasy");
+    expect(uneasy).not.toMatch(/nervous|sweating/);
+    const nervous = prompt(59);
+    expect(nervous).toContain("a bit nervous");
+    expect(nervous).not.toContain("You are sweating");
     expect(prompt(60)).toContain("You are sweating");
+  });
+
+  test("brings up the context once per worry level it rises to, not on every reaction", () => {
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
+    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const prompt = (signals: string) => {
+      writeFileSync(join(stateDir, ".signals.sessionA"), signals);
+      reactWithGemini("reply", "ask", { bin });
+      return readFileSync(join(root, "args.log"), "utf8");
+    };
+
+    expect(prompt("sweat=true context=45 tired=false\n")).toContain("context window");
+    expect(prompt("sweat=true context=47 tired=false\n")).not.toContain("context window");
+    expect(prompt("sweat=true context=55 tired=false\n")).toContain("context window");
+    expect(prompt("sweat=true context=58 tired=false\n")).not.toContain("context window");
+    expect(prompt("sweat=false context=10 tired=false\n")).not.toContain("context window");
+    expect(prompt("sweat=true context=45 tired=false\n")).toContain("context window");
   });
 
   test("asks the second account in its own home once the first one's quota is spent, until that quota resets", () => {
