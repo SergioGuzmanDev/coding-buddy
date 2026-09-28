@@ -316,11 +316,16 @@ export interface ReactionState {
   mood?: string;
 }
 
+/** The status line's gated path (buddy-status.sh, GATED): there a closed bubble stays reopenable past reactionTTL. */
+function closedBubbleReopenable(config: BuddyConfig): boolean {
+  return config.animate === "focused" && !!process.env.ITERM_SESSION_ID && existsSync(join(stateDir(), "focused-session"));
+}
+
 export function loadReaction(): ReactionState | null {
   try {
     const data: ReactionState = JSON.parse(readFileSync(reactionFile(), "utf8"));
-    const { reactionTTL } = loadConfig();
-if (reactionTTL > 0 && Date.now() - data.timestamp > reactionTTL * 1000) {
+    const config = loadConfig();
+if (config.reactionTTL > 0 && !closedBubbleReopenable(config) && Date.now() - data.timestamp > config.reactionTTL * 1000) {
   rmSync(reactionFile(), { force: true });
   return null;
 }

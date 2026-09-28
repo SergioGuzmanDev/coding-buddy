@@ -347,6 +347,20 @@ describe("buddy statusline colors", () => {
     expect(existsSync(fresh)).toBe(true);
   });
 
+  test("under animate focused, sweeps other sessions' reactions only once they are a week old", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ reactionTTL: 30, animate: "focused" });
+    const gone = join(stateDir, "reaction.other1.json");
+    const idle = join(stateDir, "reaction.other2.json");
+    const day = 24 * 60 * 60_000;
+    writeFileSync(gone, JSON.stringify({ reaction: "gone", timestamp: Date.now() - 7 * day - 60_000 }));
+    writeFileSync(idle, JSON.stringify({ reaction: "idle", timestamp: Date.now() - 6 * day }));
+
+    runStatusline(configDir);
+
+    expect(existsSync(gone)).toBe(false);
+    expect(existsSync(idle)).toBe(true);
+  });
+
   test("uses a finite default TTL while honoring zero as permanent", () => {
     const defaultFixture = createStatuslineFixture({});
     const defaultReaction = join(defaultFixture.stateDir, "reaction.default.json");
@@ -737,37 +751,50 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, {}, { ...at, ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
     });
 
-    describe("under animate focused, the move and its mood wait for 3 seconds of focus after the reaction", () => {
+    describe("under animate focused, the bubble, move and mood last 15 seconds from 3 seconds of focus after the reaction", () => {
       const clock = Math.floor(Date.now() / 1000);
       const red = "\x1b[38;2;255;0;0m";
-      const setup = () => {
-        const made = fixture({ moveSequences: { coffee: [3, 1] }, moodColors: { angry: ["#FF0000"] } }, { animate: "focused" });
+      const reopenLink = "\x1b]8;;coding-buddy://reopen/default\x1b\\...\x1b]8;;\x1b\\";
+      const setup = (config: Record<string, unknown> = {}) => {
+        const made = fixture({ moveSequences: { coffee: [3, 1] }, moodColors: { angry: ["#FF0000"] } }, { animate: "focused", ...config });
         const reaction = join(made.stateDir, "reaction.default.json");
         const focus = join(made.stateDir, "focused-session");
         const gate = join(made.stateDir, ".move_gate.default");
+        const cache = join(made.stateDir, ".render.default");
         writeFileSync(focus, "BBB");
-        const react = (secondsAgo: number) => writeFileSync(reaction,
-          JSON.stringify({ reaction: "*sorbe*", timestamp: (clock - secondsAgo) * 1000, move: "coffee", mood: "angry" }));
+        const react = (secondsAgo: number, extra: Record<string, unknown> = { move: "coffee", mood: "angry" }) =>
+          writeFileSync(reaction, JSON.stringify({ reaction: "*sorbe*", timestamp: (clock - secondsAgo) * 1000, ...extra }));
         const tick = (seconds: number, session = "w0t1p0:BBB") =>
           render(made.configDir, {}, { BUDDY_FAKE_NOW: String(clock + seconds), ITERM_SESSION_ID: session });
         const touch = (path: string, seconds: number) => utimesSync(path, clock + seconds, clock + seconds);
-        return { ...made, reaction, focus, gate, react, tick, touch };
+        const reopen = (url = "coding-buddy://reopen/default", env: Record<string, string> = {}) =>
+          spawnSync("/bin/bash", [join(import.meta.dir, "reopen-bubble.sh"), url], {
+            env: { ...process.env, CLAUDE_CONFIG_DIR: made.configDir, CLAUDE_CODE_SESSION_ID: "", TMUX_PANE: "", ...env },
+          });
+        return { ...made, reaction, focus, gate, cache, react, tick, touch, reopen };
       };
 
-      test("already focused when it arrives, it starts 3 seconds after the reaction and plays for 30", () => {
+      test("already focused when it arrives, all three start 3 seconds after the reaction and end together 15 seconds later", () => {
         const { reaction, focus, react, tick, touch } = setup();
         react(1);
         touch(focus, -100);
         touch(reaction, -1);
 
-        expect(tick(0)).toContain("art-rest");
-        expect(tick(0)).not.toContain(red);
+        const waiting = tick(0);
+        expect(waiting).toContain("*sorbe*");
+        expect(waiting).toContain("art-rest");
+        expect(waiting).not.toContain(red);
         const started = tick(2);
         expect(started).toContain("art-cheer");
         expect(started).toContain(red);
         expect(tick(3)).toContain("art-tired");
-        expect(tick(31)).toContain("art-tired");
-        expect(tick(32)).toContain("art-rest");
+        const last = tick(16);
+        expect(last).toContain("art-cheer");
+        expect(last).toContain("*sorbe*");
+        const closed = tick(17);
+        expect(closed).toContain("art-rest");
+        expect(closed).not.toContain(red);
+        expect(closed).not.toContain("*sorbe*");
       });
 
       test("focused after it arrives, it counts 3 seconds from the first focused render, without rewriting its state meanwhile", () => {
@@ -783,7 +810,7 @@ describe("buddy sub-status cache", () => {
         expect(tick(3)).toContain("art-cheer");
       });
 
-      test("focus going away restarts the count, but not a move already playing", () => {
+      test("focus going away restarts the count, but not a window already running", () => {
         const { reaction, focus, gate, react, tick, touch } = setup();
         react(10);
         touch(reaction, -10);
@@ -797,6 +824,131 @@ describe("buddy sub-status cache", () => {
 
         touch(focus, 100);
         expect(tick(7)).toContain("art-tired");
+      });
+
+      test("unseen, the bubble stays open in an unfocused tab however old, and never counts there", () => {
+        const { gate, react, tick } = setup({ reactionTTL: 30 });
+        react(5000);
+
+        expect(tick(0, "w0t0p0:AAA")).toContain("*sorbe*");
+        expect(existsSync(gate)).toBe(false);
+      });
+
+      test("a closed bubble outlives reactionTTL, and leaves no marker without clickToExpand", () => {
+        const { reaction, focus, react, tick, touch } = setup({ reactionTTL: 30 });
+        react(5000);
+        touch(focus, -6000);
+        touch(reaction, -5000);
+
+        const closed = tick(0);
+        expect(closed).not.toContain("*sorbe*");
+        expect(closed).not.toContain("coding-buddy://reopen");
+        expect(existsSync(reaction)).toBe(true);
+      });
+
+      test("with clickToExpand the closed bubble shrinks to a marker linked to coding-buddy://reopen/<sid>, in every full layout", () => {
+        const box = { classic: [".-----.", "`-----'"], bubble: [".-----.", "'-----'"], tight: [`(\x1b[3m ${reopenLink} \x1b[0m`] };
+        for (const [layout, marks] of Object.entries(box)) {
+          const { reaction, focus, react, tick, touch } = setup({ clickToExpand: true, slim: layout === "classic" ? false : layout });
+          react(5000);
+          touch(reaction, -5000);
+          touch(focus, -1);
+
+          expect(tick(0)).not.toContain("coding-buddy://reopen");
+          const closed = tick(20);
+          expect(closed).toContain(reopenLink);
+          expect(closed).not.toContain("*sorbe*");
+          for (const mark of marks) expect(closed).toContain(mark);
+        }
+      });
+
+      test("an unfocused tab keeps no render while the bubble counts down, and caches the closed one", () => {
+        const { reaction, cache, react, tick, touch } = setup({ clickToExpand: true });
+        react(10);
+        touch(reaction, -10);
+
+        tick(-3);
+        tick(0);
+        expect(tick(1, "w0t0p0:AAA")).toContain("*sorbe*");
+        expect(existsSync(cache)).toBe(false);
+        expect(tick(15, "w0t0p0:AAA")).toContain(reopenLink);
+        expect(existsSync(cache)).toBe(true);
+      });
+
+      test("reopening shows the bubble again at once, even over an unfocused tab's render, and replays the move", () => {
+        const { stateDir, reaction, gate, cache, react, tick, touch, reopen } = setup({ clickToExpand: true });
+        react(100);
+        touch(reaction, -100);
+        touch(join(stateDir, "config.json"), -100);
+        tick(-20);
+        tick(-17);
+        expect(tick(-1, "w0t0p0:AAA")).toContain(reopenLink);
+        touch(cache, -1);
+
+        expect(reopen().status).toBe(0);
+        const now = Number(readFileSync(gate, "utf8").split("\n")[1]) - clock;
+        expect(tick(now, "w0t0p0:AAA")).toContain("*sorbe*");
+        const replay = tick(now);
+        expect(replay).toContain("*sorbe*");
+        expect(replay).toContain("art-cheer");
+        expect(replay).toContain(red);
+        expect(tick(now + 15)).toContain(reopenLink);
+      });
+
+      test("a reopened reaction without a move or mood just shows its bubble", () => {
+        const { reaction, gate, react, tick, touch, reopen } = setup({ clickToExpand: true });
+        react(100, {});
+        touch(reaction, -100);
+        tick(-20);
+        expect(tick(-2)).toContain(reopenLink);
+
+        reopen();
+        const now = Number(readFileSync(gate, "utf8").split("\n")[1]) - clock;
+        const shown = tick(now);
+        expect(shown).toContain("*sorbe*");
+        expect(shown).toContain("art-rest");
+      });
+
+      test("the reopen link opens nothing but a plain session id with a reaction", () => {
+        const { configDir, stateDir, gate, react, reopen } = setup();
+        const pwned = join(stateDir, "pwned");
+        react(100);
+        mkdirSync(join(stateDir, "reaction.a"));
+        mkdirSync(join(stateDir, ".move_gate.a"));
+        writeFileSync(join(configDir, "outside.json"), JSON.stringify({ timestamp: 1 }));
+
+        for (const url of [
+          "coding-buddy://reopen/default/x",
+          "coding-buddy://reopen/default?x=1",
+          "coding-buddy://reopen/a/../../outside",
+          "coding-buddy://toggle",
+          "coding-buddy://reopen/",
+          "coding-buddy://reopen/../default",
+          `coding-buddy://reopen/default;touch ${pwned}`,
+          `coding-buddy://reopen/$(touch ${pwned})`,
+          "coding-buddy://reopen/default\n",
+          "coding-buddy://reopen/nosuchsid",
+          "http://reopen/default",
+        ]) {
+          expect(reopen(url).status).toBe(0);
+        }
+        expect(existsSync(gate)).toBe(false);
+        expect(existsSync(pwned)).toBe(false);
+        expect(existsSync(join(configDir, "outside"))).toBe(false);
+        expect(readdirSync(stateDir).filter((name) => name.startsWith(".move_gate"))).toEqual([".move_gate.a"]);
+        expect(readdirSync(join(stateDir, ".move_gate.a"))).toEqual([]);
+
+        reopen();
+        expect(readFileSync(gate, "utf8")).toMatch(new RegExp(`^${(clock - 100) * 1000}\n\\d+\nopen\n$`));
+      });
+
+      test("a closed bubble's text leaves the one-line minimal tier too", () => {
+        const { reaction, focus, react, tick, touch } = setup({ statuslineDensity: "minimal" });
+        react(5000);
+        touch(focus, -6000);
+        touch(reaction, -5000);
+
+        expect(tick(0)).not.toContain("*sorbe*");
       });
 
       test("where focus is not tracked, it plays at once as before", () => {

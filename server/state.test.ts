@@ -5,7 +5,7 @@
  * resolves its paths lazily (see the regression guard note below).
  */
 import { afterEach, describe, test, expect } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { Companion } from "../core/engine.ts";
@@ -77,6 +77,38 @@ describe("F3: saveReaction / writeStatusState reaction-provenance contract", () 
     const after = loadReaction();
     expect(after?.source).toBe("tool");
     expect(after?.reaction).toBe("*tool wrote this*");
+  });
+});
+
+describe("loadReaction and reactionTTL", () => {
+  test("keeps a reaction past the TTL where the status line gates it by focus, and expires it elsewhere", async () => {
+    const stateDir = makeTempStateDir();
+    stateDirs.push(stateDir);
+    process.env.CLAUDE_CONFIG_DIR = stateDir;
+    const saved = { sid: process.env.CLAUDE_CODE_SESSION_ID, iterm: process.env.ITERM_SESSION_ID };
+    process.env.CLAUDE_CODE_SESSION_ID = "gatedABC";
+    const { loadReaction, buddyStateDir } = { ...(await import("./state.ts")), ...(await import("./path.ts")) };
+    const dir = buddyStateDir();
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "reaction.gatedABC.json");
+    const old = () => writeFileSync(file, JSON.stringify({ reaction: "old", reason: "turn", timestamp: Date.now() - 3_600_000 }));
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ reactionTTL: 30, animate: "focused" }));
+    writeFileSync(join(dir, "focused-session"), "AAA");
+    try {
+      process.env.ITERM_SESSION_ID = "w0t0p0:AAA";
+      old();
+      expect(loadReaction()?.reaction).toBe("old");
+      expect(existsSync(file)).toBe(true);
+
+      delete process.env.ITERM_SESSION_ID;
+      expect(loadReaction()).toBeNull();
+      expect(existsSync(file)).toBe(false);
+    } finally {
+      for (const [key, value] of [["CLAUDE_CODE_SESSION_ID", saved.sid], ["ITERM_SESSION_ID", saved.iterm]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 });
 

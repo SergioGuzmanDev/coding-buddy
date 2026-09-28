@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# Registers coding-buddy:// with macOS so cmd+clicking the buddy's name runs toggle-expanded.sh.
+# Registers coding-buddy:// with macOS: cmd+clicking the buddy's name runs toggle-expanded.sh, and its
+# closed bubble reopen-bubble.sh.
 set -euo pipefail
 
 app="$HOME/Applications/Coding Buddy Toggle.app"
 toggle="${1:-$HOME/.claude-buddy/app/statusline/toggle-expanded.sh}"
+reopen="$(dirname "$toggle")/reopen-bubble.sh"
 plist="$app/Contents/Info.plist"
 source_file=$(mktemp -t coding-buddy-toggle)
 
-# The URL itself is ignored: any web page can open coding-buddy:// links.
+# Any web page can open coding-buddy:// links: the URL only picks a script, and reopen-bubble.sh gets
+# it as one quoted argument to validate.
 cat > "$source_file" <<EOF
 on open location theURL
-	do shell script "/bin/bash " & quoted form of "$toggle"
+	if theURL is "coding-buddy://toggle" then
+		do shell script "/bin/bash " & quoted form of "$toggle"
+	else if theURL starts with "coding-buddy://reopen/" then
+		do shell script "/bin/bash " & quoted form of "$reopen" & " " & quoted form of theURL
+	end if
 end open location
 EOF
 
@@ -34,4 +41,4 @@ rm -f "$source_file"
 # Editing Info.plist breaks osacompile's signature; an unsigned edit is refused at launch.
 codesign --force --deep --sign - "$app"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
-echo "Registered coding-buddy:// -> $toggle"
+echo "Registered coding-buddy:// -> $toggle, $reopen"

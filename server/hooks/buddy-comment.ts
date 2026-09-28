@@ -185,7 +185,7 @@ function findFreshToolReaction(
   return best;
 }
 
-// reaction.<sid>.json and .last_comment.<sid> are absent: the status line expires those by reactionTTL.
+// reaction.<sid>.json and .last_comment.<sid> are absent: the status line sweeps those itself.
 const SESSION_FILE =
   /^\.(substatus|substatus-sweep|render|signals|move_gate|worry_told|last_stop_hook|last_reaction|last_mood|last_bad|error_streak|session_start)\.([^.]+)(\.lock)?$/;
 const TMP_LEFTOVER = /^(\.[a-z_-]+\.[^.]+|reaction\.[^.]+\.json)\.tmp(\.|$)/;
