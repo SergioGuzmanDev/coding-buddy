@@ -237,6 +237,27 @@ describe("gemini-react", () => {
     expect(callCount()).toBe(5);
   });
 
+  test("gives the second account its own unlocked keychain before each call, so macOS never asks where to keep the token", () => {
+    const home = join(stateDir, "gemini-fallback-home");
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+    writeFileSync(join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "{}");
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
+    const security = join(root, "bin", "security");
+    mkdirSync(join(root, "bin"));
+    writeFileSync(security, `#!/bin/sh\necho "$HOME $*" >> "${root}/security.log"\n[ "$1" = create-keychain ] && touch "$4"\nexit 0\n`);
+    chmodSync(security, 0o755);
+    process.env.PATH = `${join(root, "bin")}:${process.env.PATH}`;
+    const bin = fakeGemini(spentFirstAccount(home));
+    const keychain = join(home, "Library", "Keychains", "login.keychain-db");
+    const securityCalls = () => readFileSync(join(root, "security.log"), "utf8").trim().split("\n");
+
+    reactWithGemini("reply", "ask", { bin });
+    expect(securityCalls()).toEqual([`${home} create-keychain -p  ${keychain}`, `${home} unlock-keychain -p  ${keychain}`]);
+
+    reactWithGemini("reply", "ask", { bin });
+    expect(securityCalls().slice(2)).toEqual([`${home} unlock-keychain -p  ${keychain}`]);
+  });
+
   test("never runs a second account that is not signed in", () => {
     const home = join(stateDir, "gemini-fallback-home");
     mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });

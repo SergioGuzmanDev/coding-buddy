@@ -209,15 +209,28 @@ function stderrReason(stderr: string, status: number | null): string {
 interface GeminiAccount {
   env?: NodeJS.ProcessEnv;
   agyDir: string;
+  prepare?: () => void;
 }
 
-/** A second account, signed in once with `HOME=<its home> agy`: that HOME hides the macOS Keychain, so agy keeps it in a file. */
+/** A second account, signed in once with `HOME=<its home> agy`: that HOME hides the user's Keychain, so it cannot replace the first. */
 function fallbackAccount(stateDir: string): GeminiAccount | undefined {
   const home = join(stateDir, "gemini-fallback-home");
   const agyDir = join(home, ".gemini", "antigravity-cli");
   // Signed out, agy would open a browser sign-in on every turn.
   if (!existsSync(join(agyDir, "antigravity-oauth-token"))) return undefined;
-  return { env: { ...process.env, HOME: home }, agyDir };
+  const env = { ...process.env, HOME: home };
+  return { env, agyDir, prepare: () => openOwnKeychain(home, env) };
+}
+
+// agy also saves its token through the Keychain. With none under this HOME, macOS asks where to store it on every
+// refresh; with a locked one, after a reboot, it asks for the password.
+function openOwnKeychain(home: string, env: NodeJS.ProcessEnv): void {
+  const keychain = join(home, "Library", "Keychains", "login.keychain-db");
+  if (!existsSync(keychain)) {
+    mkdirSync(join(home, "Library", "Keychains"), { recursive: true });
+    spawnSync("security", ["create-keychain", "-p", "", keychain], { env });
+  }
+  spawnSync("security", ["unlock-keychain", "-p", "", keychain], { env });
 }
 
 // agy retries a spent quota for over a minute and its reply may never come, so the log is where the quota shows.
@@ -319,6 +332,7 @@ export function reactWithGemini(
     const model = loadConfig().geminiModel;
     const ask = (account: GeminiAccount): GeminiAnswer => {
       rmSync(logFile, { force: true });
+      account.prepare?.();
       const answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
       if (answer.conversationId) forgetConversation(answer.conversationId, account.agyDir);
       return answer;
