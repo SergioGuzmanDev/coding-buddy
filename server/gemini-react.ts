@@ -108,7 +108,7 @@ export function readBuddyLook(stateDir: string): BuddyLook {
 // The drop is drawn from 40%, but a single "you are sweating" made Gemini panic at 40% as much as at 90%.
 function sweatLine(contextPct: number): string {
   if (contextPct < 50) return "The conversation's context window is getting fuller, which makes you slightly uneasy. Barely let it show.";
-  if (contextPct < 75) return "You are a bit nervous: the conversation's context window is over half full.";
+  if (contextPct < 60) return "You are a bit nervous: the conversation's context window is over half full.";
   return "You are sweating: the conversation's context window is nearly full.";
 }
 

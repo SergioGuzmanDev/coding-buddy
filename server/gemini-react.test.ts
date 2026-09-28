@@ -180,9 +180,9 @@ describe("gemini-react", () => {
 
     expect(prompt(45)).toContain("slightly uneasy");
     expect(prompt(45)).not.toMatch(/nervous|sweating/);
-    expect(prompt(60)).toContain("a bit nervous");
-    expect(prompt(60)).not.toContain("You are sweating");
-    expect(prompt(80)).toContain("You are sweating");
+    expect(prompt(59)).toContain("a bit nervous");
+    expect(prompt(59)).not.toContain("You are sweating");
+    expect(prompt(60)).toContain("You are sweating");
   });
 
   test("says it is sleeping when the agy CLI is missing", () => {
