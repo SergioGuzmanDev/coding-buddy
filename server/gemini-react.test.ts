@@ -187,6 +187,17 @@ describe("gemini-react", () => {
     expect(bubble().reaction).toBe("Sleeping, brain not responding. invalid model selection: model flash is not recognized");
   });
 
+  test("points agy's log at one file in the state dir, replaced on every call", () => {
+    const logFile = join(stateDir, ".gemini_last.log");
+    writeFileSync(logFile, "PREVIOUS-RUN");
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
+
+    reactWithGemini("reply", "ask", { bin: fakeGemini(`cat "${root}/out.json"`) });
+
+    expect(readFileSync(join(root, "args.log"), "utf8")).toContain(`--log-file\n${logFile}\n`);
+    expect(existsSync(logFile)).toBe(false);
+  });
+
   test("deletes the conversation agy stored for the call and nothing else", () => {
     const id = "7cc3f07a-428a-4241-b904-1538fd46a1de";
     const mine = "11111111-2222-3333-4444-555555555555";

@@ -174,8 +174,11 @@ function stderrReason(stderr: string, status: number | null): string {
   return shorten(firstSentence(last) || `exit ${status}`);
 }
 
-function askGemini(bin: string, model: string, prompt: string, cwd: string, moveNames: string[]): GeminiAnswer {
-  const args = ["-p", prompt, "--output-format", "json", "--model", model, "--mode", "plan", "--disable-slash-commands"];
+function askGemini(bin: string, model: string, prompt: string, cwd: string, moveNames: string[], logFile: string): GeminiAnswer {
+  const args = [
+    "-p", prompt, "--output-format", "json", "--model", model, "--mode", "plan", "--disable-slash-commands",
+    "--log-file", logFile,
+  ];
   // Print mode must never sit waiting on a stdin that nobody writes to.
   const result = spawnSync(bin, args, { cwd, encoding: "utf8", input: "", timeout: GEMINI_TIMEOUT_MS });
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return { error: "agy CLI not found" };
@@ -240,7 +243,10 @@ export function reactWithGemini(
       : "";
     const prompt = buildPrompt(companion, assistantMessage, userMessage, earlier, readBuddyLook(stateDir));
     const moveNames = statusMoveChoices(companion.bones.species).map((m) => m.name);
-    const answer = askGemini(runtime.bin ?? "agy", loadConfig().geminiModel, prompt, cwd, moveNames);
+    // agy keeps a ~25 KB log of every run in its own log directory and never deletes it; only the last one is kept here.
+    const logFile = join(stateDir, ".gemini_last.log");
+    rmSync(logFile, { force: true });
+    const answer = askGemini(runtime.bin ?? "agy", loadConfig().geminiModel, prompt, cwd, moveNames, logFile);
     if (answer.conversationId) {
       forgetConversation(answer.conversationId, runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli"));
     }
