@@ -185,6 +185,36 @@ describe("gemini-react", () => {
     expect(prompt(60)).toContain("You are sweating");
   });
 
+  test("uses the Gemini API key in its own home once the signed-in quota is spent, until that quota resets", () => {
+    writeFileSync(join(stateDir, "gemini-api-key"), "test-key\n");
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks* from the key" }));
+    const bin = fakeGemini(`
+      log=""; prev=""; for a in "$@"; do [ "$prev" = "--log-file" ] && log="$a"; prev="$a"; done
+      if [ -z "$GEMINI_API_KEY" ]; then
+        echo 'attempt 1 failed (RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h0m5s.)' > "$log"
+        echo '{"error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached."}'; exit 1
+      fi
+      echo "$HOME $GEMINI_API_KEY" > "${root}/key-run.log"
+      cat "${root}/out.json"`);
+    let clock = 1_000_000;
+    const react = () => reactWithGemini("reply", "ask", { bin, now: () => clock });
+
+    react();
+    expect(bubble().reaction).toBe("*quacks* from the key");
+    expect(callCount()).toBe(2);
+    const home = join(stateDir, "gemini-api-home");
+    expect(readFileSync(join(root, "key-run.log"), "utf8")).toBe(`${home} test-key\n`);
+    expect(JSON.parse(readFileSync(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8"))).toEqual({ modelProvider: "gemini" });
+
+    clock += (2 * 3600 + 4) * 1000;
+    react();
+    expect(callCount()).toBe(3);
+
+    clock += 2000;
+    react();
+    expect(callCount()).toBe(5);
+  });
+
   test("says it is sleeping when the agy CLI is missing", () => {
     reactWithGemini("reply", "ask", { bin: join(root, "no-such-agy") });
 

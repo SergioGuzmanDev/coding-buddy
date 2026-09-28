@@ -6,7 +6,7 @@
 
 import { Database } from "bun:sqlite";
 import { spawnSync } from "child_process";
-import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from "fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { Companion } from "../core/engine.ts";
@@ -186,13 +186,60 @@ function stderrReason(stderr: string, status: number | null): string {
   return shorten(firstSentence(last) || `exit ${status}`);
 }
 
-function askGemini(bin: string, model: string, prompt: string, cwd: string, moveNames: string[], logFile: string): GeminiAnswer {
+interface GeminiAccount {
+  env?: NodeJS.ProcessEnv;
+  agyDir: string;
+}
+
+/** A Gemini API key has a free quota of its own; its own HOME keeps agy's signed-in account and settings untouched. */
+function apiKeyAccount(stateDir: string): GeminiAccount | undefined {
+  let key = "";
+  try {
+    key = readFileSync(join(stateDir, "gemini-api-key"), "utf8").trim();
+  } catch {
+    return undefined;
+  }
+  if (!key) return undefined;
+  const home = join(stateDir, "gemini-api-home");
+  const agyDir = join(home, ".gemini", "antigravity-cli");
+  mkdirSync(agyDir, { recursive: true });
+  const settings = join(agyDir, "settings.json");
+  if (!existsSync(settings)) writeFileSync(settings, JSON.stringify({ modelProvider: "gemini" }));
+  return { env: { ...process.env, HOME: home, GEMINI_API_KEY: key }, agyDir };
+}
+
+// agy retries a spent quota for over a minute and its reply may never come, so the log is where the quota shows.
+function quotaResetsInMs(logFile: string): number | undefined {
+  let log = "";
+  try {
+    log = readFileSync(logFile, "utf8");
+  } catch {
+    return undefined;
+  }
+  if (!/RESOURCE_EXHAUSTED|quota reached/i.test(log)) return undefined;
+  const reset = /Resets in (?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/.exec(log);
+  const ms = reset ? ((Number(reset[1] ?? 0) * 60 + Number(reset[2] ?? 0)) * 60 + Number(reset[3] ?? 0)) * 1000 : 0;
+  return ms || FAILURE_BACKOFF_MS;
+}
+
+function spentUntil(path: string): number {
+  try {
+    const until = JSON.parse(readFileSync(path, "utf8"))?.until;
+    return typeof until === "number" ? until : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function askGemini(
+  bin: string, model: string, prompt: string, cwd: string, moveNames: string[], logFile: string, env?: NodeJS.ProcessEnv,
+): GeminiAnswer {
   const args = [
     "-p", prompt, "--output-format", "json", "--model", model, "--mode", "plan", "--disable-slash-commands",
     "--log-file", logFile,
   ];
   // Print mode must never sit waiting on a stdin that nobody writes to.
-  const result = spawnSync(bin, args, { cwd, encoding: "utf8", input: "", timeout: GEMINI_TIMEOUT_MS });
+  const result = spawnSync(bin, args, { cwd, env, encoding: "utf8", input: "", timeout: GEMINI_TIMEOUT_MS });
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return { error: "agy CLI not found" };
   if (result.signal) return { error: `no answer in ${GEMINI_TIMEOUT_MS / 1000}s` };
   let reply: { response?: unknown; error?: unknown; conversation_id?: unknown } = {};
@@ -257,10 +304,26 @@ export function reactWithGemini(
     const moveNames = statusMoveChoices(companion.bones.species).map((m) => m.name);
     // agy keeps a ~25 KB log of every run in its own log directory and never deletes it; only the last one is kept here.
     const logFile = join(stateDir, ".gemini_last.log");
-    rmSync(logFile, { force: true });
-    const answer = askGemini(runtime.bin ?? "agy", loadConfig().geminiModel, prompt, cwd, moveNames, logFile);
-    if (answer.conversationId) {
-      forgetConversation(answer.conversationId, runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli"));
+    const model = loadConfig().geminiModel;
+    const ask = (account: GeminiAccount): GeminiAnswer => {
+      rmSync(logFile, { force: true });
+      const answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
+      if (answer.conversationId) forgetConversation(answer.conversationId, account.agyDir);
+      return answer;
+    };
+    const signedIn: GeminiAccount = { agyDir: runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli") };
+    const apiKey = apiKeyAccount(stateDir);
+    const quotaFile = join(stateDir, ".gemini_quota.json");
+    let answer: GeminiAnswer;
+    if (apiKey && spentUntil(quotaFile) > now()) {
+      answer = ask(apiKey);
+    } else {
+      answer = ask(signedIn);
+      const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
+      if (resetsIn) {
+        writeFileSync(quotaFile, JSON.stringify({ until: now() + resetsIn }));
+        if (apiKey) answer = ask(apiKey);
+      }
     }
     if ("reaction" in answer) {
       saveReaction(answer.reaction, "turn", "gemini", answer.move, answer.mood);
