@@ -334,6 +334,19 @@ describe("buddy statusline colors", () => {
     expect(output).not.toMatch(/^ *\.[-]{12,}\.$/m);
   });
 
+  test("sweeps other sessions' expired reactions and keeps their fresh ones", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ reactionTTL: 30 });
+    const stale = join(stateDir, "reaction.other1.json");
+    const fresh = join(stateDir, "reaction.other2.json");
+    writeFileSync(stale, JSON.stringify({ reaction: "old", timestamp: Date.now() - 60_000 }));
+    writeFileSync(fresh, JSON.stringify({ reaction: "new", timestamp: Date.now() }));
+
+    runStatusline(configDir);
+
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+  });
+
   test("uses a finite default TTL while honoring zero as permanent", () => {
     const defaultFixture = createStatuslineFixture({});
     const defaultReaction = join(defaultFixture.stateDir, "reaction.default.json");
@@ -404,34 +417,6 @@ describe("buddy sub-status cache", () => {
     expect(existsSync(tempFile)).toBe(false);
     expect(readdirSync(stateDir).filter((name) => name.startsWith(".substatus.default.")).sort())
       .toEqual([]);
-  });
-
-  test("sweeps old temp files without deleting the cache, the lock or anything below the state dir", async () => {
-    const { configDir, stateDir } = createStatuslineFixture({});
-    const cacheFile = join(stateDir, ".substatus.default");
-    const staleTemp = join(stateDir, ".substatus.default.old");
-    const nestedTemp = join(stateDir, "app", ".substatus.default.old");
-    const lockDir = join(stateDir, ".substatus.default.lock");
-    const sweepLock = join(stateDir, ".substatus-sweep.default.lock");
-    const oldDate = new Date(Date.now() - 2 * 60 * 60 * 1000);
-
-    writeFileSync(cacheFile, "cached\n");
-    writeFileSync(staleTemp, "orphan\n");
-    mkdirSync(join(stateDir, "app"));
-    writeFileSync(nestedTemp, "not ours\n");
-    mkdirSync(lockDir);
-    mkdirSync(sweepLock);
-    utimesSync(staleTemp, oldDate, oldDate);
-    utimesSync(nestedTemp, oldDate, oldDate);
-    utimesSync(sweepLock, oldDate, oldDate);
-
-    expect(runStatusline(configDir).status).toBe(0);
-    await waitFor(() => !existsSync(staleTemp));
-    await waitFor(() => !existsSync(sweepLock));
-    expect(existsSync(staleTemp)).toBe(false);
-    expect(existsSync(nestedTemp)).toBe(true);
-    expect(readFileSync(cacheFile, "utf8")).toBe("cached\n");
-    expect(existsSync(lockDir)).toBe(true);
   });
 
   test("truncates cached sub-status rows to the adjusted budget", () => {
@@ -516,6 +501,7 @@ describe("buddy sub-status cache", () => {
     const row = runStatusline(configDir, "{}\n", "60").stdout.toString().split("\n").find((l) => l.includes("AAAA"));
 
     expect(row!.length).toBeLessThanOrEqual(46);
+    expect(row!.match(/A+/)![0]).toHaveLength(45);
   });
 
   test("measures a sub-status OSC 8 link by its visible text only", () => {
@@ -558,6 +544,22 @@ describe("buddy sub-status cache", () => {
     expect(lines[0]).toStartWith("LEFT-SIDE-STATUS");
     expect(lines[0]).toContain("Nimbus");
     expect(lines[0]).toContain("…");
+  });
+
+  test("inline mode leaves a multi-line sub-status below the buddy", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      statuslineDensity: "minimal",
+      subStatusInline: true,
+      subStatusCommand: "printf ignored",
+    });
+    writeFileSync(join(stateDir, ".substatus.default"), "LINE-ONE\nLINE-TWO\n");
+
+    const lines = runStatusline(configDir, "{}\n", "80").stdout.toString().split("\n").filter(Boolean);
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("Nimbus");
+    expect(lines[1]).toStartWith("LINE-ONE");
+    expect(lines[2]).toStartWith("LINE-TWO");
   });
 
   test("inline mode falls back to two rows when the buddy does not fit", () => {
@@ -774,6 +776,24 @@ describe("buddy sub-status cache", () => {
       expect(shown).toContain("*da una calada*");
       expect(shown).toContain("art-tired");
     });
+  });
+
+  test("an unfocused session keeps no render until its sub-status cache exists", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      animate: "focused",
+      subStatusInline: true,
+      subStatusCommand: "sleep 5",
+    });
+    const cache = join(stateDir, ".render.default");
+    writeFileSync(join(stateDir, "focused-session"), "AAA");
+    const tick = () => runStatusline(configDir, "{}\n", "80", { ITERM_SESSION_ID: "w0t1p0:BBB" });
+
+    tick();
+    expect(existsSync(cache)).toBe(false);
+
+    writeFileSync(join(stateDir, ".substatus.default"), "LEFT-SIDE-STATUS\n");
+    tick();
+    expect(readFileSync(cache, "utf8")).toContain("LEFT-SIDE-STATUS");
   });
 
   test("an unfocused session reprints its render while Claude Code's input changes every tick", () => {

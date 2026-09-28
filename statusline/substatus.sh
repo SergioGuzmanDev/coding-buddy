@@ -5,6 +5,7 @@
 # kills a statusline process when the next one starts, so running the command
 # inline would make slow commands disappear before they can finish.
 
+# Sets SUBSTATUS_MTIME to the mtime of $1 in epoch seconds, or 0.
 _substatus_mtime() {
     local path="$1"
     local value
@@ -13,8 +14,8 @@ _substatus_mtime() {
         ''|*[!0-9]*) value=$(stat -c %Y "$path" 2>/dev/null) ;;
     esac
     case "$value" in
-        ''|*[!0-9]*) echo 0 ;;
-        *) echo "$value" ;;
+        ''|*[!0-9]*) SUBSTATUS_MTIME=0 ;;
+        *) SUBSTATUS_MTIME="$value" ;;
     esac
 }
 
@@ -25,31 +26,20 @@ append_substatus() {
     local cache_file="$state_dir/.substatus.$sid"
     local lock_dir="$state_dir/.substatus.$sid.lock"
     local command=""
-    local now cache_age lock_age refresh_seconds configured_refresh_seconds line sweep_lock sweep_lock_age
-
-    # Cleanup is intentionally detached: stale temp files are housekeeping and
-    # must not make the statusline wait on a filesystem walk. The lock keeps
-    # concurrent statusline ticks from launching duplicate sweeps.
-    sweep_lock="$state_dir/.substatus-sweep.$sid.lock"
-    if [ -d "$sweep_lock" ]; then
-        sweep_lock_age=$(( $(date +%s) - $(_substatus_mtime "$sweep_lock") ))
-        if [ "$sweep_lock_age" -gt 300 ]; then
-            rmdir "$sweep_lock" 2>/dev/null || rm -rf "$sweep_lock" 2>/dev/null
-        fi
-    fi
-    if mkdir "$sweep_lock" 2>/dev/null; then
-        (
-            trap 'rmdir "$sweep_lock" 2>/dev/null' EXIT
-            find "$state_dir" -maxdepth 1 -type f -name ".substatus.$sid.*" -mmin +60 -exec rm -f {} + 2>/dev/null
-        ) >/dev/null 2>&1 &
-    fi
+    local now cache_age lock_age refresh_seconds configured_refresh_seconds="" line
 
     [ -f "$config_file" ] || return 0
-    command=$(jq -r '.subStatusCommand // ""' "$config_file" 2>/dev/null)
+    # buddy-status.sh reads both settings in its own config jq.
+    if [ -n "${SUBSTATUS_SETTINGS_READ:-}" ]; then
+        command="$SUBSTATUS_COMMAND"
+        configured_refresh_seconds="$SUBSTATUS_REFRESH_SECONDS"
+    else
+        { IFS= read -r -d '' command; IFS= read -r -d '' configured_refresh_seconds; } < <(jq -j \
+            '(.subStatusCommand // ""), (.subStatusRefreshSeconds // "") | tostring, "\u0000"' "$config_file" 2>/dev/null)
+    fi
     [ -n "$command" ] || return 0
 
     refresh_seconds=15
-    configured_refresh_seconds=$(jq -r '.subStatusRefreshSeconds // empty' "$config_file" 2>/dev/null)
     case "$configured_refresh_seconds" in
         ''|*[!0-9]*) ;;
         *) [ "$configured_refresh_seconds" -gt 0 ] && refresh_seconds="$configured_refresh_seconds" ;;
@@ -70,10 +60,11 @@ append_substatus() {
             _substatus_print_line "$line"
         done < "$cache_file"
     fi
-    now=$(date +%s)
+    now=${EPOCH_NOW:-$(date +%s)}
     cache_age=999999
     if [ -f "$cache_file" ]; then
-        cache_age=$(( now - $(_substatus_mtime "$cache_file") ))
+        _substatus_mtime "$cache_file"
+        cache_age=$(( now - SUBSTATUS_MTIME ))
         [ "$cache_age" -lt 0 ] && cache_age=0
     fi
     [ "$cache_age" -lt "$refresh_seconds" ] && return 0
@@ -81,7 +72,8 @@ append_substatus() {
     # mkdir is the portable atomic lock primitive. Only remove locks that are
     # over a minute old, so a slow but healthy command is never duplicated.
     if [ -d "$lock_dir" ]; then
-        lock_age=$(( now - $(_substatus_mtime "$lock_dir") ))
+        _substatus_mtime "$lock_dir"
+        lock_age=$(( now - SUBSTATUS_MTIME ))
         # A refresh killed alongside its parent leaves this lock behind. The
         # window must be short enough that a fresh session recovers within a
         # few ticks instead of rendering no sub-status at all, but longer than

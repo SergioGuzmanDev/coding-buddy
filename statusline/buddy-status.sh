@@ -36,28 +36,37 @@ esac
 
 [ "$BUDDY_SHELL" = "1" ] && exit 0
 
+_HERE="${BASH_SOURCE[0]%/*}"
+[ "$_HERE" = "${BASH_SOURCE[0]}" ] && _HERE=.
 # shellcheck source=../scripts/paths.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../scripts/paths.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/substatus.sh"
+source "$_HERE/../scripts/paths.sh"
+source "$_HERE/substatus.sh"
 
 STATE="$BUDDY_STATE_DIR/status.json"
 CONFIG_FILE="$BUDDY_STATE_DIR/config.json"
 # Per-session ID resolved by paths.sh (CLAUDE_CODE_SESSION_ID > TMUX_PANE > default)
 SID="$BUDDY_SID"
 REACTION_FILE="$BUDDY_STATE_DIR/reaction.$SID.json"
-BUDDY_STATUSLINE_INPUT=$(cat)
+IFS= read -r -d '' BUDDY_STATUSLINE_INPUT
+BUDDY_STATUSLINE_INPUT="${BUDDY_STATUSLINE_INPUT%$'\n'}"
 
 # Unfocused iTerm2 sessions under animate "focused" reprint their last render until their reaction or
 # the config changes. Claude Code's input differs on every tick, so it cannot be part of that check.
 RENDER_CACHE=""
+_config_text=""
+_focused=""
+[ -f "$CONFIG_FILE" ] && IFS= read -r -d '' _config_text < "$CONFIG_FILE"
+[ -f "$BUDDY_STATE_DIR/focused-session" ] && IFS= read -r _focused < "$BUDDY_STATE_DIR/focused-session"
+_animate_focused_re='"animate": *"focused"'
 if [ -n "${ITERM_SESSION_ID:-}" ] && [ -f "$BUDDY_STATE_DIR/focused-session" ] \
-    && grep -q '"animate": *"focused"' "$CONFIG_FILE" 2>/dev/null; then
+    && [[ "$_config_text" =~ $_animate_focused_re ]]; then
     _render_cache="$BUDDY_STATE_DIR/.render.$SID"
-    if [ "$(cat "$BUDDY_STATE_DIR/focused-session")" = "${ITERM_SESSION_ID#*:}" ]; then
+    if [ "$_focused" = "${ITERM_SESSION_ID#*:}" ]; then
         # Reprinting a render from before this focus would undo everything shown while focused.
         [ -f "$_render_cache" ] && rm -f "$_render_cache"
     elif [ "$_render_cache" -nt "$CONFIG_FILE" ] && [ "$_render_cache" -nt "$REACTION_FILE" ]; then
-        cat "$_render_cache"
+        IFS= read -r -d '' _rendered < "$_render_cache"
+        printf '%s' "$_rendered"
         exit 0
     else
         RENDER_CACHE="$_render_cache"
@@ -78,35 +87,48 @@ read_fields() {
 # array so a malformed field there cannot shift the values after it.
 # The level comes from xp.json because awarding XP rewrites only that file; the copy in status.json
 # is as old as the last buddy tool call. It is read raw so a damaged xp.json cannot blank the buddy.
+# The same jq reads config.json and this session's reaction, each parsed on its own so a damaged one
+# only falls back to its defaults; try keeps a malformed rainbowColors from blanking the other settings.
 _xp_file="$BUDDY_STATE_DIR/xp.json"
 [ -f "$_xp_file" ] || _xp_file=/dev/null
+_config_path="$CONFIG_FILE"
+[ -f "$_config_path" ] || _config_path=/dev/null
+_reaction_path="$REACTION_FILE"
+[ -f "$_reaction_path" ] || _reaction_path=/dev/null
 read_fields MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD \
-    TRANSCRIPT CONTEXT_PCT USAGE_5H_PCT < <(jq -j --arg input "$BUDDY_STATUSLINE_INPUT" --rawfile xp "$_xp_file" '
+    TRANSCRIPT CONTEXT_PCT USAGE_5H_PCT \
+    _cfg_theme _cfg_animate _color _bubble_color _cfg_hide_rarity _custom _cfg_inline _cfg_expanded \
+    _cfg_click _ttl _bw _bm _wa _density _cfg_slim SUBSTATUS_COMMAND SUBSTATUS_REFRESH_SECONDS \
+    REACTION TS REACTION_MOVE REACTION_MOOD < <(jq -j --arg input "$BUDDY_STATUSLINE_INPUT" --rawfile xp "$_xp_file" \
+        --rawfile config "$_config_path" --rawfile reaction "$_reaction_path" '
     def pct: if type == "number" then floor else 0 end;
-    (.muted // false), (.name // ""), (.rarity // "common"), (.stars // ""), (.shiny // false),
+    def object($raw): (try ($raw | fromjson) catch null) | if type == "object" then . else null end;
+    object($config) as $c | object($reaction) as $r
+    | (.muted // false), (.name // ""), (.rarity // "common"), (.stars // ""), (.shiny // false),
     (.achievement // ""), (if has("achievementAt") then (.achievementAt // 0) else "absent" end),
     ((try ($xp | fromjson | .level) catch null) // .level // 1), (.mood // "focused"),
     (try ($input | fromjson | [(.transcript_path // ""), (.context_window.used_percentage | pct),
-        (.rate_limits.five_hour.used_percentage | pct)]) catch ["", 0, 0])[]
+        (.rate_limits.five_hour.used_percentage | pct)]) catch ["", 0, 0])[],
+    ($c.theme // "auto"), (if $c.animate == null then "true" else ($c.animate | tostring) end),
+    ($c.color // ""), ($c.bubbleColor // ""), ($c.showRarity == false), (try (($c.rainbowColors // []) | @tsv) catch ""),
+    ($c.subStatusInline // false), ($c.expanded // false), ($c.clickToExpand // false), ($c.reactionTTL // 900),
+    ($c.bubbleWidth // 44), ($c.bubbleMargin // 8), ($c.statuslineWidthAdjust // 0), ($c.statuslineDensity // "auto"),
+    ($c.slim // false), ($c.subStatusCommand // ""), ($c.subStatusRefreshSeconds // ""),
+    ($r.reaction // ""), ($r.timestamp // 0), ($r.move // ""), ($r.mood // "")
     | tostring, "\u0000"' "$STATE" 2>/dev/null)
 [ "$MUTED" = "true" ] && exit 0
 [ -z "$NAME" ] && exit 0
 
 # ─── Animation timing ───────────────────────────────────────────────────────
-NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
+# The only date call: real-time checks (expiry, freshness) use EPOCH_NOW, the animation uses NOW.
+EPOCH_NOW=$(date +%s)
+NOW=${BUDDY_FAKE_NOW:-$EPOCH_NOW}
 # The actual frame body is selected later once density/rows are known.
 
 # ─── Rarity color (theme-aware) ─────────────────────────────────────────────
 _THEME="dark"
 if [ -f "$CONFIG_FILE" ]; then
-    # try: a malformed rainbowColors must not blank every other setting read by the same jq.
-    read_fields _cfg_theme _cfg_animate _color _bubble_color _cfg_hide_rarity _custom _cfg_inline _cfg_expanded \
-        _cfg_click _ttl _bw _bm _wa _density _cfg_slim < <(jq -j '
-        (.theme // "auto"), (if .animate == null then "true" else (.animate | tostring) end),
-        (.color // ""), (.bubbleColor // ""), (.showRarity == false), (try ((.rainbowColors // []) | @tsv) catch ""),
-        (.subStatusInline // false), (.expanded // false), (.clickToExpand // false), (.reactionTTL // 900),
-        (.bubbleWidth // 44), (.bubbleMargin // 8), (.statuslineWidthAdjust // 0), (.statuslineDensity // "auto"),
-        (.slim // false) | tostring, "\u0000"' "$CONFIG_FILE" 2>/dev/null)
+    SUBSTATUS_SETTINGS_READ=1
     [ "$_cfg_theme" = "light" ] && _THEME="light"
 fi
 
@@ -130,9 +152,10 @@ B=$'\xe2\xa0\x80'  # Braille Blank U+2800
 
 # ─── Rainbow colors for shiny buddies ────────────────────────────────────────
 # Default ROYGBIV palette; overridden by rainbowColors in config.json
+# Sets the variable named $1 to the truecolor escape for the #RRGGBB in $2.
 _hex_to_ansi() {
-    local hex="${1#\#}"
-    printf '\033[38;2;%d;%d;%dm' "$(( 16#${hex:0:2} ))" "$(( 16#${hex:2:2} ))" "$(( 16#${hex:4:2} ))"
+    local hex="${2#\#}"
+    printf -v "$1" '\033[38;2;%d;%d;%dm' "$(( 16#${hex:0:2} ))" "$(( 16#${hex:2:2} ))" "$(( 16#${hex:4:2} ))"
 }
 
 RAINBOW=(
@@ -153,19 +176,19 @@ if [ -f "$CONFIG_FILE" ]; then
         false) ANIMATE=0 ;;
         focused)
             if [ -n "${ITERM_SESSION_ID:-}" ]; then
-                _focused=$(cat "$BUDDY_STATE_DIR/focused-session" 2>/dev/null)
                 [ "$_focused" = "${ITERM_SESSION_ID#*:}" ] || ANIMATE=0
             fi
             ;;
     esac
-    [[ "$_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && C=$(_hex_to_ansi "$_color")
-    [[ "$_bubble_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && BC=$(_hex_to_ansi "$_bubble_color")
+    [[ "$_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && _hex_to_ansi C "$_color"
+    [[ "$_bubble_color" =~ ^#?[0-9A-Fa-f]{6}$ ]] && _hex_to_ansi BC "$_bubble_color"
     # "// true" would turn an explicit false into true.
     [ "$_cfg_hide_rarity" = "true" ] && STARS=""
     if [ -n "$_custom" ]; then
         RAINBOW=()
         for _hex in $_custom; do
-            RAINBOW+=("$(_hex_to_ansi "$_hex")")
+            _hex_to_ansi _rainbow_color "$_hex"
+            RAINBOW+=("$_rainbow_color")
         done
     fi
 fi
@@ -337,23 +360,23 @@ esac
 
 _sweep_expired_reactions() {
     [ "$REACTION_TTL" -gt 0 ] 2>/dev/null || return 0
-    local now cutoff_ms cutoff_seconds file ts
-    now=$(date +%s)
-    cutoff_ms=$(( (now - REACTION_TTL) * 1000 ))
-    cutoff_seconds=$(( now - REACTION_TTL ))
+    local cutoff_seconds=$(( EPOCH_NOW - REACTION_TTL ))
+    local cutoff_ms=$(( cutoff_seconds * 1000 )) file ts content timestamp_re='"timestamp":[[:space:]]*([0-9]+)'
 
+    # Builtins only: this runs every tick over every session's files.
     for file in "$BUDDY_STATE_DIR"/reaction.*.json; do
         [ -f "$file" ] || continue
-        ts=$(jq -r '.timestamp // 0' "$file" 2>/dev/null || echo 0)
-        case "$ts" in
-            ''|*[!0-9]*) rm -f "$file" 2>/dev/null ;;
-            *) [ "$ts" -le "$cutoff_ms" ] 2>/dev/null && rm -f "$file" 2>/dev/null ;;
-        esac
+        content=""
+        IFS= read -r -d '' content < "$file"
+        ts=0
+        [[ "$content" =~ $timestamp_re ]] && ts="${BASH_REMATCH[1]}"
+        [ "$ts" -le "$cutoff_ms" ] 2>/dev/null && rm -f "$file" 2>/dev/null
     done
 
     for file in "$BUDDY_STATE_DIR"/.last_comment.*; do
         [ -f "$file" ] || continue
-        ts=$(cat "$file" 2>/dev/null)
+        ts=""
+        IFS= read -r ts < "$file"
         case "$ts" in
             ''|*[!0-9]*) rm -f "$file" 2>/dev/null ;;
             *) [ "$ts" -le "$cutoff_seconds" ] 2>/dev/null && rm -f "$file" 2>/dev/null ;;
@@ -378,7 +401,7 @@ if [ -n "$ACHIEVEMENT" ] && [ "$ACHIEVEMENT" != "null" ]; then
             ''|0|*[!0-9]*) ACH_FRESH=0 ;;
             *)
                 if [ "$REACTION_TTL" -gt 0 ] 2>/dev/null; then
-                    ACH_AGE=$(( ($(date +%s) * 1000 - ACHIEVEMENT_AT) / 1000 ))
+                    ACH_AGE=$(( (EPOCH_NOW * 1000 - ACHIEVEMENT_AT) / 1000 ))
                     [ "$ACH_AGE" -ge "$REACTION_TTL" ] && ACH_FRESH=0
                 fi
                 ;;
@@ -387,19 +410,13 @@ if [ -n "$ACHIEVEMENT" ] && [ "$ACHIEVEMENT" != "null" ]; then
     [ "$ACH_FRESH" -eq 1 ] && BUBBLE=$'\xf0\x9f\x8f\x86'" $ACHIEVEMENT"
 fi
 
-REACTION=""
-REACTION_MOVE=""
-REACTION_MOOD=""
-[ -f "$REACTION_FILE" ] && read_fields REACTION TS REACTION_MOVE REACTION_MOOD < <(jq -j '
-    (.reaction // ""), (.timestamp // 0), (.move // ""), (.mood // "") | tostring, "\u0000"' "$REACTION_FILE" 2>/dev/null)
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
     FRESH=0
     if [ "$REACTION_TTL" -eq 0 ]; then
         FRESH=1
     elif [ -f "$REACTION_FILE" ]; then
         if [ "$TS" != "0" ]; then
-            NOW=$(date +%s)
-            AGE=$(( (NOW * 1000 - TS) / 1000 ))
+            AGE=$(( (EPOCH_NOW * 1000 - TS) / 1000 ))
             [ "$AGE" -lt "$REACTION_TTL" ] && FRESH=1
         fi
     fi
@@ -415,7 +432,6 @@ if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; the
 fi
 
 # ─── Animation: pick current density frame from server-rendered frames ───────
-NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
 SWEAT_AT_CONTEXT_PCT=40
 TIRED_AT_5H_PCT=50
 ASLEEP_AFTER_IDLE_SECONDS=300
@@ -431,7 +447,8 @@ _old_signals=""
 [ "$_signals" = "$_old_signals" ] || printf '%s\n' "$_signals" > "$BUDDY_STATE_DIR/.signals.$SID"
 # The transcript grows with every message and tool call, so its age is how long the conversation has been quiet.
 MOVE=pool
-if [ -f "$TRANSCRIPT" ] && [ $(( NOW - $(_substatus_mtime "$TRANSCRIPT") )) -ge "$ASLEEP_AFTER_IDLE_SECONDS" ]; then
+[ -f "$TRANSCRIPT" ] && _substatus_mtime "$TRANSCRIPT"
+if [ -f "$TRANSCRIPT" ] && [ $(( NOW - SUBSTATUS_MTIME )) -ge "$ASLEEP_AFTER_IDLE_SECONDS" ]; then
     MOVE=idle
 elif [ "$TIRED" = true ]; then
     MOVE=tired
@@ -506,11 +523,11 @@ NAME_LEN=${#NAME_WITH_LEVEL}
 ART_CENTER=6
 NAME_PAD=$(( ART_CENTER - NAME_LEN / 2 ))
 [ "$NAME_PAD" -lt 0 ] && NAME_PAD=0
-NAME_LINE="$(printf '%*s%s' "$NAME_PAD" '' "$NAME_WITH_LEVEL")"
+printf -v NAME_LINE '%*s%s' "$NAME_PAD" '' "$NAME_WITH_LEVEL"
 
 BC="${BC:-$C}"
 # The mood repaints the buddy only; the bubble keeps its color so the reaction stays readable.
-[[ "$MOOD_COLOR" =~ ^#[0-9A-Fa-f]{6}$ ]] && C=$(_hex_to_ansi "$MOOD_COLOR")
+[[ "$MOOD_COLOR" =~ ^#[0-9A-Fa-f]{6}$ ]] && _hex_to_ansi C "$MOOD_COLOR"
 # Italic only: faint on top of italic made the bubble text hard to read.
 ITALIC=$'\033[3m'
 if [ "$COLOR_ENABLED" -eq 0 ]; then
@@ -548,60 +565,47 @@ if [ -n "$BUBBLE" ]; then
     BUBBLE_TEXT="${BUBBLE_TEXT#\"}"
 fi
 
-# ─── Display width (emojis count as 2 cols) ──────────────────────────────────
-# iconv turns the string into a stream of UTF-32LE codepoints, then awk sums
-# widths. Rules mirror server/art.ts:displayWidth; the generated data lists
-# every Unicode Emoji_Presentation codepoint, while VS16 upgrades a previous
-# narrow emoji to 2 cols (e.g. ❤ + VS16).
-EMOJI_WIDTHS_DATA="$(dirname "${BASH_SOURCE[0]}")/emoji-widths.data"
-EMOJI_PRES_2600="$(grep -v '^#' "$EMOJI_WIDTHS_DATA" 2>/dev/null | tr -d '\n')"
-EMOJI_TEXT_DATA="$(dirname "${BASH_SOURCE[0]}")/emoji-text.data"
-EMOJI_TEXT="$(grep -v '^#' "$EMOJI_TEXT_DATA" 2>/dev/null | tr -d '\n')"
-
-dwidth() {
-    printf '%s' "$1" | iconv -f UTF-8 -t UTF-32LE 2>/dev/null | od -An -tu4 -v | awk -v pres="$EMOJI_PRES_2600" -v text="$EMOJI_TEXT" '
-    function load_ranges(value, target,    n, i, count, piece, bounds, start, end, cp) {
-        n = split(value, ranges, ",")
-        for (i = 1; i <= n; i++) {
-            count = split(ranges[i], bounds, "-")
-            start = bounds[1] + 0
-            end = (count == 2) ? bounds[2] + 0 : start
-            for (cp = start; cp <= end; cp++) target[cp] = 1
-        }
-    }
-    BEGIN {
-        load_ranges(pres, wide)
-        load_ranges(text, text_default)
-    }
-    # Precondition: cp is neither a variation selector (65024-65039) nor ZWJ
-    # (8205); the main loop filters those before calling in.
-    function char_width(cp) {
-        if (cp in wide) return 2
-        if (cp >= 9472 && cp <= 9631) return 1
-        if (cp >= 12288 && cp <= 40959) return 2
-        if (cp >= 65281 && cp <= 65376) return 2
-        return 1
-    }
-    { for (i = 1; i <= NF; i++) {
-        cp = $i + 0
-        if (cp == 65039) {
-            if (upgradable) { w += 1; upgradable = 0 }
-            continue
-        }
-        if ((cp >= 65024 && cp <= 65038) || cp == 8205) { upgradable = 0; continue }
-        cw = char_width(cp)
-        w += cw
-        upgradable = 0
-        if (cw == 1 && (cp in text_default)) upgradable = 1
-    } }
-    END { print w+0 }'
+# Sets ANSI_PLAIN to $1 without escape sequences, with the same ends as ansi_seq_end. It jumps from
+# escape to escape: bash finds the Nth character of a UTF-8 string by walking from its start.
+ansi_strip() {
+    local rest="$1" st=$'\033\\' to_bel to_st
+    ANSI_PLAIN=""
+    while [[ "$rest" == *$'\033'* ]]; do
+        ANSI_PLAIN="${ANSI_PLAIN}${rest%%$'\033'*}"
+        rest="${rest#*$'\033'}"
+        if [ "${rest:0:1}" = "]" ]; then
+            to_bel="${rest%%$'\a'*}"
+            to_st="${rest%%"$st"*}"
+            if [ "${#to_bel}" -lt "${#to_st}" ]; then
+                rest="${rest:$(( ${#to_bel} + 1 ))}"
+            elif [ "$to_st" != "$rest" ]; then
+                rest="${rest:$(( ${#to_st} + 2 ))}"
+            else
+                rest=""
+            fi
+        else
+            case "$rest" in *m*) rest="${rest#*m}" ;; *) rest="" ;; esac
+        fi
+    done
+    ANSI_PLAIN="${ANSI_PLAIN}${rest}"
 }
-# Prints the total display width, then one width per UTF-8 codepoint, on one line. ANSI-aware
-# truncation uses this profile to make one Unicode-width pass over the complete output row.
-dwidth_profile() {
-    printf '%s' "$1" | iconv -f UTF-8 -t UTF-32LE 2>/dev/null | od -An -tu4 -v | awk -v pres="$EMOJI_PRES_2600" -v text="$EMOJI_TEXT" '
-    function load_ranges(value, target,    n, i, count, piece, bounds, start, end, cp) {
-        n = split(value, ranges, ",")
+
+# ─── Display width (emojis count as 2 cols) ──────────────────────────────────
+# Prints one width per argument, so a tick measures its strings in one process. awk reads UTF-8
+# byte by byte: a byte that is not part of valid UTF-8 counts as one column, as bash counts it.
+# Rules mirror server/art.ts:displayWidth; the generated data lists every Unicode
+# Emoji_Presentation codepoint, while VS16 upgrades a previous narrow emoji to 2 cols (e.g. ❤ + VS16).
+# With "profile" first, each line holds the total and then the width of every character.
+EMOJI_WIDTHS_DATA="$_HERE/emoji-widths.data"
+EMOJI_TEXT_DATA="$_HERE/emoji-text.data"
+dwidths() {
+    local mode=width
+    [ "$1" = "profile" ] && mode=profile && shift
+    printf '%s\n' "$@" | LC_ALL=C awk -v mode="$mode" -v pres_file="$EMOJI_WIDTHS_DATA" -v text_file="$EMOJI_TEXT_DATA" '
+    function load_ranges(path, target,    line, data, n, i, count, bounds, start, end, cp) {
+        while ((getline line < path) > 0) if (line !~ /^#/) data = data line
+        close(path)
+        n = split(data, ranges, ",")
         for (i = 1; i <= n; i++) {
             count = split(ranges[i], bounds, "-")
             start = bounds[1] + 0
@@ -610,9 +614,12 @@ dwidth_profile() {
         }
     }
     BEGIN {
-        load_ranges(pres, wide)
-        load_ranges(text, text_default)
+        for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i
+        load_ranges(pres_file, wide)
+        load_ranges(text_file, text_default)
     }
+    function tail(k) { return ord[substr($0, k, 1)] - 128 }
+    function is_tail(k,    b) { b = ord[substr($0, k, 1)]; return b >= 128 && b < 192 }
     function char_width(cp) {
         if (cp in wide) return 2
         if (cp >= 9472 && cp <= 9631) return 1
@@ -621,48 +628,84 @@ dwidth_profile() {
         return 1
     }
     {
-        for (j = 1; j <= NF; j++) {
-            cp = $j + 0
-            idx++
+        len = length($0); total = 0; count = 0; upgradable = 0
+        for (i = 1; i <= len; ) {
+            b = ord[substr($0, i, 1)]
+            if (b >= 240 && b < 245 && is_tail(i + 1) && is_tail(i + 2) && is_tail(i + 3)) {
+                cp = (b - 240) * 262144 + tail(i + 1) * 4096 + tail(i + 2) * 64 + tail(i + 3); i += 4
+            } else if (b >= 224 && b < 240 && is_tail(i + 1) && is_tail(i + 2)) {
+                cp = (b - 224) * 4096 + tail(i + 1) * 64 + tail(i + 2); i += 3
+            } else if (b >= 194 && b < 224 && is_tail(i + 1)) {
+                cp = (b - 192) * 64 + tail(i + 1); i += 2
+            } else {
+                cp = (b < 128) ? b : -1; i++
+            }
+            count++
             if (cp == 65039) {
-                if (upgradable && idx > 1) widths[idx - 1] += 1
-                widths[idx] = 0
+                if (upgradable && count > 1) { widths[count - 1]++; total++ }
+                widths[count] = 0
                 upgradable = 0
                 continue
             }
             if ((cp >= 65024 && cp <= 65038) || cp == 8205) {
-                widths[idx] = 0
+                widths[count] = 0
                 upgradable = 0
                 continue
             }
             cw = char_width(cp)
-            widths[idx] = cw
-            upgradable = 0
-            if (cw == 1 && (cp in text_default)) upgradable = 1
+            widths[count] = cw
+            total += cw
+            upgradable = (cw == 1 && (cp in text_default))
         }
-    }
-    END {
-        line = ""
-        for (j = 1; j <= idx; j++) { total += widths[j]; line = line " " (widths[j] + 0) }
-        print (total + 0) line
+        if (mode != "profile") { print total; next }
+        out = total
+        for (j = 1; j <= count; j++) out = out " " widths[j]
+        print out
     }'
 }
+dwidth() { dwidths "$1"; }
+
+# Sets SUBSTATUS_LEFT, its plain text and SUBSTATUS_SINGLE=1 when the sub-status cache is one line.
+load_single_substatus() {
+    local cache="$BUDDY_STATE_DIR/.substatus.$SID" line lines=0
+    [ -f "$cache" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        lines=$(( lines + 1 ))
+        [ "$lines" -eq 1 ] && SUBSTATUS_LEFT="$line"
+    done < "$cache"
+    [ "$lines" -eq 1 ] || return 0
+    ansi_strip "$SUBSTATUS_LEFT"
+    SUBSTATUS_PLAIN="$ANSI_PLAIN"
+    SUBSTATUS_SINGLE=1
+}
+SUBSTATUS_LEFT=""
+SUBSTATUS_PLAIN=""
+SUBSTATUS_SINGLE=0
+[ "$SUBSTATUS_INLINE" -eq 1 ] && load_single_substatus
+
+WORDS=()
+[ -n "$BUBBLE_TEXT" ] && read -r -a WORDS <<< "$BUBBLE_TEXT"
+_widths=()
+IFS=$'\n' read -r -d '' -a _widths < <(dwidths "$NAME_WITH_LEVEL" "$NAME_LINE" "$SUBSTATUS_PLAIN" \
+    "${ART_LINES[@]}" ${WORDS[@]+"${WORDS[@]}"})
+LABEL_W="${_widths[0]}"
+NAME_LINE_W="${_widths[1]}"
+SUBSTATUS_LEFT_W="${_widths[2]}"
+WORD_WIDTHS=(${_widths[@]:$(( 3 + ${#ART_LINES[@]} ))})
 ART_W=0
-for line in "${ART_LINES[@]}"; do
-    line_w=$(dwidth "$line")
+for line_w in "${_widths[@]:3:${#ART_LINES[@]}}"; do
     [ "$line_w" -gt "$ART_W" ] && ART_W="$line_w"
 done
 
 # Keep the label inside the same sprite column as the art. The exact Unicode
-# width rules live in dwidth(), so the shell and TS renderers agree on bounds.
-LABEL_W=$(dwidth "$NAME_WITH_LEVEL")
+# width rules live in dwidths(), so the shell and TS renderers agree on bounds.
 if [ "$LABEL_W" -gt "$ART_W" ] 2>/dev/null; then
     ART_W="$LABEL_W"
     NAME_PAD=$(( (ART_W - LABEL_W) / 2 ))
-    NAME_LINE="$(printf '%*s%s' "$NAME_PAD" '' "$NAME_WITH_LEVEL")"
+    printf -v NAME_LINE '%*s%s' "$NAME_PAD" '' "$NAME_WITH_LEVEL"
     ALL_LINES[$(( ART_COUNT - 1 ))]="$NAME_LINE"
+    NAME_LINE_W="$LABEL_W"
 fi
-NAME_LINE_W=$(dwidth "$NAME_LINE")
 # Centering the name against a short fixture frame can make the label wider
 # than every art row; include that width before sizing the card.
 [ "$NAME_LINE_W" -gt "$ART_W" ] && ART_W="$NAME_LINE_W"
@@ -743,30 +786,24 @@ else
 fi
 
 # ─── Word-wrap bubble text ────────────────────────────────────────────────────
-WORDS=()
-WORD_WIDTHS=()
-if [ -n "$BUBBLE_TEXT" ]; then
-    read -r -a WORDS <<< "$BUBBLE_TEXT"
-    for word in "${WORDS[@]}"; do
-        WORD_WIDTHS+=("$(dwidth "$word")")
-    done
-fi
+[ -n "$BUBBLE_TEXT" ] || { WORDS=(); WORD_WIDTHS=(); }
 
-# Sets TEXT_LINES to WORDS wrapped at $1 columns.
+# Sets TEXT_LINES to WORDS wrapped at $1 columns, and TEXT_WIDTHS to their widths.
 wrap_words() {
     local width="$1" i line="" line_w=0
     TEXT_LINES=()
+    TEXT_WIDTHS=()
     for i in "${!WORDS[@]}"; do
         if [ -z "$line" ]; then
             line="${WORDS[$i]}"; line_w=${WORD_WIDTHS[$i]}
         elif [ $(( line_w + 1 + WORD_WIDTHS[i] )) -le "$width" ]; then
             line="$line ${WORDS[$i]}"; line_w=$(( line_w + 1 + WORD_WIDTHS[i] ))
         else
-            TEXT_LINES+=("$line")
+            TEXT_LINES+=("$line"); TEXT_WIDTHS+=("$line_w")
             line="${WORDS[$i]}"; line_w=${WORD_WIDTHS[$i]}
         fi
     done
-    [ -n "$line" ] && TEXT_LINES+=("$line")
+    [ -n "$line" ] && TEXT_LINES+=("$line") && TEXT_WIDTHS+=("$line_w")
 }
 wrap_words "$INNER_W"
 
@@ -806,7 +843,8 @@ BOX_W=$(( INNER_W + 4 ))
 BUBBLE_LINES=()
 BUBBLE_TYPES=()  # "border" or "text" — determines coloring
 if [ $TEXT_COUNT -gt 0 ]; then
-    BORDER=$(printf '%*s' "$(( BOX_W - 2 ))" '' | tr ' ' '-')
+    printf -v BORDER '%*s' "$(( BOX_W - 2 ))" ''
+    BORDER="${BORDER// /-}"
     _top=".${BORDER}."
     _bottom="\`${BORDER}'"
     [ "$SLIM" = "bubble" ] && _bottom="'${BORDER}'"
@@ -818,9 +856,9 @@ if [ $TEXT_COUNT -gt 0 ]; then
     _last_text=$(( TEXT_COUNT - 1 ))
     for _ti in "${!TEXT_LINES[@]}"; do
         tl="${TEXT_LINES[$_ti]}"
-        tpad=$(( INNER_W - $(dwidth "$tl") ))
+        tpad=$(( INNER_W - TEXT_WIDTHS[_ti] ))
         [ "$tpad" -lt 0 ] && tpad=0
-        padding=$(printf '%*s' "$tpad" '')
+        printf -v padding '%*s' "$tpad" ''
         edges="||"
         if [ "$BUBBLE_ROUND" -eq 1 ]; then
             case "$_ti" in
@@ -854,9 +892,9 @@ PAD=$(( COLS - TOTAL_W - 1 ))
 
 # On Windows (Git Bash / MSYS2), Braille Blank (U+2800) renders as double-width,
 # which doubles the spacer and pushes content off-screen. Use regular spaces instead.
-case "$(uname -s)" in
-    MINGW*|CYGWIN*|MSYS*) SPACER=$(printf '%*s' "$PAD" '') ;;
-    *)                     SPACER=$(printf "${B}%${PAD}s" "") ;;
+case "${OSTYPE:-}" in
+    msys*|cygwin*|win32*) printf -v SPACER '%*s' "$PAD" '' ;;
+    *)                    printf -v SPACER "${B}%${PAD}s" "" ;;
 esac
 
 # Minimal tier uses plain spaces so the one-line sprite + name fits without
@@ -864,7 +902,7 @@ esac
 if [ "$TIER" = "minimal" ]; then
     PAD=$(( COLS - ART_W ))
     [ "$PAD" -lt 0 ] && PAD=0
-    SPACER=$(printf '%*s' "$PAD" '')
+    printf -v SPACER '%*s' "$PAD" ''
 fi
 
 # Vertically center bubble box on the art
@@ -911,7 +949,7 @@ for (( i=0; i<MAX_LINES; i++ )); do
     if [ $ai -ge 0 ] && [ $ai -lt $ART_COUNT ]; then
         art_part="${ALL_COLORS[$ai]}${ALL_LINES[$ai]}${NC}"
     else
-        art_part=$(printf '%*s' "$ART_W" '')
+        printf -v art_part '%*s' "$ART_W" ''
     fi
 
     if [ $BUBBLE_COUNT -gt 0 ]; then
@@ -936,7 +974,7 @@ for (( i=0; i<MAX_LINES; i++ )); do
                 OUTPUT_LINES+=("${SPACER}${BC}${pipe_l}${ITALIC}${inner}${NC}${BC}${pipe_r}${NC}${gap}${art_part}")
             fi
         else
-            empty=$(printf '%*s' "$BOX_W" '')
+            printf -v empty '%*s' "$BOX_W" ''
             OUTPUT_LINES+=("${SPACER}${empty}   ${art_part}")
         fi
     else
@@ -966,31 +1004,6 @@ ansi_seq_end() {
     ANSI_SEQ_END=$i
 }
 
-# Sets ANSI_PLAIN to $1 without escape sequences, with the same ends as ansi_seq_end. It jumps from
-# escape to escape: bash finds the Nth character of a UTF-8 string by walking from its start.
-ansi_strip() {
-    local rest="$1" st=$'\033\\' to_bel to_st
-    ANSI_PLAIN=""
-    while [[ "$rest" == *$'\033'* ]]; do
-        ANSI_PLAIN="${ANSI_PLAIN}${rest%%$'\033'*}"
-        rest="${rest#*$'\033'}"
-        if [ "${rest:0:1}" = "]" ]; then
-            to_bel="${rest%%$'\a'*}"
-            to_st="${rest%%"$st"*}"
-            if [ "${#to_bel}" -lt "${#to_st}" ]; then
-                rest="${rest:$(( ${#to_bel} + 1 ))}"
-            elif [ "$to_st" != "$rest" ]; then
-                rest="${rest:$(( ${#to_st} + 2 ))}"
-            else
-                rest=""
-            fi
-        else
-            case "$rest" in *m*) rest="${rest#*m}" ;; *) rest="" ;; esac
-        fi
-    done
-    ANSI_PLAIN="${ANSI_PLAIN}${rest}"
-}
-
 ansi_truncate() {
     local text="$1"
     local max_width="$2"
@@ -1005,7 +1018,7 @@ ansi_truncate() {
 
     [ "$max_width" -lt 0 ] && max_width=0
 
-    # Strip SGR while building the one string sent to dwidth_profile. The
+    # Strip SGR while building the one string sent to dwidths. The
     # profile uses one iconv/od/awk pass for the whole row; never spawn a
     # subprocess for each Unicode character.
     ansi_strip "$text"
@@ -1013,7 +1026,11 @@ ansi_truncate() {
     [ "$plain" != "$text" ] && saw_sgr=1
 
     profile=(0)
-    [ -n "$plain" ] && read -r -a profile < <(dwidth_profile "$plain")
+    if [ -n "${3:-}" ]; then
+        profile=($3)
+    elif [ -n "$plain" ]; then
+        read -r -a profile < <(dwidths profile "$plain")
+    fi
     widths=("${profile[@]:1}")
     # A row that fits comes out unchanged, so skip the per-character walk. A profile that does not
     # cover every character (iconv refused the text) falls through to the walk's 1-column default.
@@ -1058,20 +1075,11 @@ statusline_output_line() {
     printf '\n'
 }
 
-# Sets SUBSTATUS_LEFT and its width from a one-line sub-status cache; fails otherwise.
-read_single_substatus() {
-    local cache="$BUDDY_STATE_DIR/.substatus.$SID"
-    [ -f "$cache" ] && [ "$(wc -l < "$cache")" -le 1 ] || return 1
-    IFS= read -r SUBSTATUS_LEFT < "$cache" || [ -n "$SUBSTATUS_LEFT" ] || return 1
-    ansi_strip "$SUBSTATUS_LEFT"
-    SUBSTATUS_LEFT_W=$(dwidth "$ANSI_PLAIN")
-}
-
 # Puts the buddy at the right end of the cached one-line sub-status, trimming the
 # reaction to the room left. Prints nothing when even the face and name do not fit.
 inline_substatus_row() {
     local buddy buddy_w room text_room text reaction_part=""
-    read_single_substatus || return 0
+    [ "$SUBSTATUS_SINGLE" -eq 1 ] || return 0
     local left="$SUBSTATUS_LEFT"
     room=$(( STATUSLINE_BUDGET - SUBSTATUS_LEFT_W - 2 ))
     buddy="$_face_name"
@@ -1089,7 +1097,7 @@ inline_substatus_row() {
 
 # Keeps the name in its column of the panel's last row, with the sub-status on its left.
 inline_name_row() {
-    read_single_substatus || return 0
+    [ "$SUBSTATUS_SINGLE" -eq 1 ] || return 0
     local pad=$(( COLS - ART_W - SUBSTATUS_LEFT_W ))
     [ "$pad" -ge 2 ] || return 0
     printf '%s%*s%s' "$SUBSTATUS_LEFT" "$pad" '' "${ALL_COLORS[$(( ART_COUNT - 1 ))]}${ALL_LINES[$(( ART_COUNT - 1 ))]}${NC}"
@@ -1121,8 +1129,15 @@ if [ "$CLICK_TO_EXPAND" -eq 1 ] && [ -n "$NAME_WITH_LEVEL" ]; then
 fi
 
 render_output() {
-    for line in "${OUTPUT_LINES[@]}"; do
-        statusline_output_line "$line"
+    local i plains=() profiles=()
+    for i in "${!OUTPUT_LINES[@]}"; do
+        ansi_strip "${OUTPUT_LINES[$i]}"
+        plains+=("$ANSI_PLAIN")
+    done
+    IFS=$'\n' read -r -d '' -a profiles < <(dwidths profile "${plains[@]}")
+    for i in "${!OUTPUT_LINES[@]}"; do
+        ansi_truncate "${OUTPUT_LINES[$i]}" "$STATUSLINE_BUDGET" "${profiles[$i]}"
+        printf '\n'
     done
 
     # Append the last cached sub-status result below the buddy panel and refresh
@@ -1133,7 +1148,10 @@ render_output() {
 if [ -n "$RENDER_CACHE" ]; then
     RENDERED=$(render_output)
     printf '%s\n' "$RENDERED"
-    printf '%s\n' "$RENDERED" > "$RENDER_CACHE.tmp.$$" && mv "$RENDER_CACHE.tmp.$$" "$RENDER_CACHE"
+    # Kept before the first sub-status refresh lands, the render would reprint without it until focused.
+    if [ -z "$SUBSTATUS_COMMAND" ] || [ -f "$BUDDY_STATE_DIR/.substatus.$SID" ]; then
+        printf '%s\n' "$RENDERED" > "$RENDER_CACHE.tmp.$$" && mv "$RENDER_CACHE.tmp.$$" "$RENDER_CACHE"
+    fi
 else
     render_output
 fi
