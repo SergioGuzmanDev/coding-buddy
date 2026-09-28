@@ -281,10 +281,10 @@ const OCTOPUS_SLEEP: StatusMove = {
 };
 
 // Octopus-only moves. One pool move is drawn at random every 30 seconds; a tired session draws from the
-// same pool by tiredWeight. The top row stays blank and every row keeps the resting width, so the panel
+// same pool by tiredWeight. A cued move needs a reason to happen, so only a Gemini reaction plays it. The top row stays blank and every row keeps the resting width, so the panel
 // never changes size mid-move, and each pose lasts two ticks so a status line refreshed every 2s still
 // shows it. In the one-row faces the extras sit around the face; the name stays pinned to the right.
-export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: StatusMove; celebrate: StatusMove }>> = {
+export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: StatusMove; cued: StatusMove[] }>> = {
   octopus: {
     pool: [
       {
@@ -386,6 +386,51 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0, 1, 1],
       },
       {
+        name: "camouflage",
+        does: "camouflages into the background",
+        frames: [
+          ["            ", "   .::::.   ", "  ( {E}  {E} )  ", "  (::::::)  ", "  /:/:/:/:  "],
+          ["            ", "   . .. .   ", "    {E}  {E}    ", "  :  ..  :  ", "   . .. .   "],
+        ],
+        faces: [":({E}{E}):", ". {E}{E} ."],
+        sequence: [0, 0, 1, 1, 1, 1, 1, 1, 0, 0],
+      },
+      {
+        name: "bubbles",
+        does: "blows bubbles",
+        frames: [
+          ["            ", "   .----.   ", "  ( {E}  {E} ) o", "  (______)o  ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.  O", "  ( {E}  {E} ) o", "  (______)o  ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----. O  ", "  ( {E}  {E} )  O", "  (______) o", "  /\\/\\/\\/\\  "],
+        ],
+        faces: ["~({E}{E})~o", "~({E}{E})~oO", "~({E}{E})~ O"],
+        sequence: [0, 0, 1, 1, 2, 2, 0, 0, 1, 1, 2, 2],
+      },
+      {
+        name: "peek",
+        does: "hides underwater and peeks out",
+        frames: [
+          ["            ", "            ", "     o      ", "   .----.   ", "~~( {E}  {E} )~~"],
+          ["            ", "            ", "   .----.   ", "  ( {E}  {E} )  ", "~~~~~~~~~~~~"],
+          ["            ", "            ", "      o     ", "     o      ", "~~~~~~~~~~~~"],
+        ],
+        faces: ["~~({E}{E})~~", "~( {E}{E} )~", "~~~o~~~"],
+        sequence: [2, 2, 0, 0, 1, 1, 1, 1, 0, 0, 2, 2],
+      },
+    ],
+    idle: OCTOPUS_SLEEP,
+    cued: [
+      {
+        name: "celebrate",
+        does: "celebrates with raised arms",
+        frames: [
+          ["            ", "\\  .----.  /", " \\( ^  ^ )/ ", "  (______)  ", "  /\\/\\/\\/\\  "],
+          ["            ", "*  .----.  *", " -( ^  ^ )- ", "  (______)  ", "  /\\/\\/\\/\\  "],
+        ],
+        faces: ["\\(^^)/", "*-(^^)-*"],
+        sequence: [0, 0, 1, 1, 0, 0, 1, 1],
+      },
+      {
         name: "idea",
         does: "gets a bright idea",
         frames: [
@@ -426,36 +471,6 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
       },
       {
-        name: "dizzy",
-        does: "is dizzy, seeing stars",
-        frames: [
-          ["            ", "  *.----.  +", "  ( o  O )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
-          ["            ", "  +.----.  *", "  ( O  o )  ", "  (______)  ", "  \\/\\/\\/\\/  "],
-        ],
-        faces: ["*(oO)+", "+(Oo)*"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-      },
-      {
-        name: "wink",
-        does: "winks",
-        frames: [
-          ["            ", "   .----.   ", "  ( {E}  - )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  - ) *", "  (______)  ", "  /\\/\\/\\/\\  "],
-        ],
-        faces: ["~({E}-)~", "~({E}-)~*"],
-        sequence: [0, 0, 1, 1, 1, 1, 0, 0],
-      },
-      {
-        name: "shrug",
-        does: "shrugs",
-        frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", " _(______)_ ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "\\_(______)_/", "  /\\/\\/\\/\\  "],
-        ],
-        faces: ["-({E}{E})-", "\\_({E}{E})_/"],
-        sequence: [0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1],
-      },
-      {
         name: "panic",
         does: "panics, flailing its tentacles",
         frames: [
@@ -476,6 +491,16 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 1, 1, 0, 0, 1, 1],
       },
       {
+        name: "dizzy",
+        does: "is dizzy, seeing stars",
+        frames: [
+          ["            ", "  *.----.  +", "  ( o  O )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
+          ["            ", "  +.----.  *", "  ( O  o )  ", "  (______)  ", "  \\/\\/\\/\\/  "],
+        ],
+        faces: ["*(oO)+", "+(Oo)*"],
+        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+      },
+      {
         name: "blush",
         does: "blushes",
         frames: [
@@ -486,47 +511,24 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0, 1, 1],
       },
       {
-        name: "ink",
-        does: "squirts ink and hides in the cloud",
+        name: "shrug",
+        does: "shrugs",
         frames: [
-          ["            ", "   .----.   ", "  ( >  < )  ", "  (______)~%", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} ) %%", "  (______)%%%", "  /\\/\\/\\/\\%%"],
-          ["            ", "  %%%%%%%%  ", " %%% {E}  {E} %%%", "  %%%%%%%%% ", "   %%%%%%   "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", " _(______)_ ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "\\_(______)_/", "  /\\/\\/\\/\\  "],
         ],
-        faces: ["~(><)~%", "~({E}{E})%%%", "%%{E}%{E}%%"],
-        sequence: [0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1],
+        faces: ["-({E}{E})-", "\\_({E}{E})_/"],
+        sequence: [0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1],
       },
       {
-        name: "camouflage",
-        does: "camouflages into the background",
+        name: "wink",
+        does: "winks",
         frames: [
-          ["            ", "   .::::.   ", "  ( {E}  {E} )  ", "  (::::::)  ", "  /:/:/:/:  "],
-          ["            ", "   . .. .   ", "    {E}  {E}    ", "  :  ..  :  ", "   . .. .   "],
+          ["            ", "   .----.   ", "  ( {E}  - )  ", "  (______)  ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  - ) *", "  (______)  ", "  /\\/\\/\\/\\  "],
         ],
-        faces: [":({E}{E}):", ". {E}{E} ."],
-        sequence: [0, 0, 1, 1, 1, 1, 1, 1, 0, 0],
-      },
-      {
-        name: "bubbles",
-        does: "blows bubbles",
-        frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} ) o", "  (______)o  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.  O", "  ( {E}  {E} ) o", "  (______)o  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----. O  ", "  ( {E}  {E} )  O", "  (______) o", "  /\\/\\/\\/\\  "],
-        ],
-        faces: ["~({E}{E})~o", "~({E}{E})~oO", "~({E}{E})~ O"],
-        sequence: [0, 0, 1, 1, 2, 2, 0, 0, 1, 1, 2, 2],
-      },
-      {
-        name: "peek",
-        does: "hides underwater and peeks out",
-        frames: [
-          ["            ", "            ", "     o      ", "   .----.   ", "~~( {E}  {E} )~~"],
-          ["            ", "            ", "   .----.   ", "  ( {E}  {E} )  ", "~~~~~~~~~~~~"],
-          ["            ", "            ", "      o     ", "     o      ", "~~~~~~~~~~~~"],
-        ],
-        faces: ["~~({E}{E})~~", "~( {E}{E} )~", "~~~o~~~"],
-        sequence: [2, 2, 0, 0, 1, 1, 1, 1, 0, 0, 2, 2],
+        faces: ["~({E}-)~", "~({E}-)~*"],
+        sequence: [0, 0, 1, 1, 1, 1, 0, 0],
       },
       {
         name: "squash",
@@ -539,18 +541,18 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         faces: ["~({E}{E})~ x", "~(><)~\\x", "~(^^)~_*"],
         sequence: [0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 2, 2],
       },
+      {
+        name: "ink",
+        does: "squirts ink and hides in the cloud",
+        frames: [
+          ["            ", "   .----.   ", "  ( >  < )  ", "  (______)~%", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} ) %%", "  (______)%%%", "  /\\/\\/\\/\\%%"],
+          ["            ", "  %%%%%%%%  ", " %%% {E}  {E} %%%", "  %%%%%%%%% ", "   %%%%%%   "],
+        ],
+        faces: ["~(><)~%", "~({E}{E})%%%", "%%{E}%{E}%%"],
+        sequence: [0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 1, 1],
+      },
     ],
-    idle: OCTOPUS_SLEEP,
-    celebrate: {
-      name: "celebrate",
-      does: "celebrates with raised arms",
-      frames: [
-        ["            ", "\\  .----.  /", " \\( ^  ^ )/ ", "  (______)  ", "  /\\/\\/\\/\\  "],
-        ["            ", "*  .----.  *", " -( ^  ^ )- ", "  (______)  ", "  /\\/\\/\\/\\  "],
-      ],
-      faces: ["\\(^^)/", "*-(^^)-*"],
-      sequence: [0, 0, 1, 1, 0, 0, 1, 1],
-    },
   },
 };
 
@@ -564,10 +566,10 @@ export const STATUS_MOODS: Record<string, { feels: string; colors: string[] }> =
   sad: { feels: "down", colors: ["#5FAFFF"] },
 };
 
-/** The moves Gemini may act out with a reaction: the pool and the celebration. */
+/** The moves Gemini may act out with a reaction: the pool and the cued moves. */
 export function statusMoveChoices(species: Species): StatusMove[] {
   const moves = STATUS_MOVES[species];
-  return moves ? [...moves.pool, moves.celebrate] : [];
+  return moves ? [...moves.pool, ...moves.cued] : [];
 }
 
 // A sweat drop just left of the eye row, and the ";" of "(^^;)" in the one-row face.
@@ -639,7 +641,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   const moves = STATUS_MOVES[bones.species];
   if (moves) {
     const firsts = new Map<StatusMove, number>();
-    for (const move of [...moves.pool, moves.idle, moves.celebrate]) {
+    for (const move of [...moves.pool, moves.idle, ...moves.cued]) {
       if (firsts.has(move)) continue;
       firsts.set(move, frames.length);
       frames.push(...move.frames.map((raw) => resolveArt(raw, eye)));

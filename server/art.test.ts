@@ -132,13 +132,17 @@ describe("getStatusFrames", () => {
   const pool = STATUS_MOVES.octopus!.pool;
   // Evenly spread draws, so every move of the pool is picked in turn.
   const everyMove = () => { let calls = 0; return () => ((calls++ % pool.length) + 0.5) / pool.length; };
-  const marks = {
+  const cued = STATUS_MOVES.octopus!.cued;
+  const poolMarks = {
     cigarette: "(______)===*", pipe: "(______)___u", wave: "(______)__/", jump: "' '' '", coffee: "c[_]",
     sleep: "( -  - ) z", look: "(@  @  )", dance: "   (______)", yawn: "(__O___)",
-    think: "?", idea: "\\!/", love: "<3", cry: "( T  T )", fume: "'.----.'", dizzy: "( o  O )", wink: "( @  - )",
-    shrug: "\\_(______)_/", panic: "/( O  O )\\", gasp: "!!", blush: "( >//< )", ink: "%%%", camouflage: "(::::::)",
-    bubbles: "(______)o", peek: "~~~~~~", squash: "__*",
+    think: "?", camouflage: "(::::::)", bubbles: "(______)o", peek: "~~~~~~",
   };
+  const cuedMarks = {
+    idea: "\\!/", love: "<3", cry: "( T  T )", fume: "'.----.'", dizzy: "( o  O )", wink: "( @  - )",
+    shrug: "\\_(______)_/", panic: "/( O  O )\\", gasp: "!!", blush: "( >//< )", ink: "%%%", squash: "__*",
+  };
+  const marks = { ...poolMarks, ...cuedMarks };
   const acting = (frame: string) => Object.values(marks).some((mark) => frame.includes(mark));
 
   test("every 30 seconds the octopus does a random move from its pool, at the resting frame's size", () => {
@@ -154,11 +158,10 @@ describe("getStatusFrames", () => {
     for (let slot = 0; slot * 30 < frameSequence.length; slot++) {
       expect(frameSequence.slice(slot * 30, slot * 30 + 30).some((i) => acting(frames[i]))).toBe(true);
     }
-    for (const mark of Object.values(marks)) expect(frameSequence.some((i) => frames[i].includes(mark))).toBe(true);
+    for (const mark of Object.values(poolMarks)) expect(frameSequence.some((i) => frames[i].includes(mark))).toBe(true);
     for (const face of [
-      " *===~(", " u___~(", ")~/", "_(@@)_", "c[_]", "~(--)~z", "~(@@ )~", "/(@@)/", "~(>O<)~", "~(@@)~??", "\\!/", "~(^^)~<3",
-      "~(;;)~", "' (><) '", "*(oO)+", "~(@-)~*", "\\_(@@)_/", "/(OO)\\", "~(oo)~!!", "~(>//<)~", "%%@%@%%", ":(@@):",
-      "~(@@)~oO", "~~(@@)~~", "~(^^)~_*",
+      " *===~(", " u___~(", ")~/", "_(@@)_", "c[_]", "~(--)~z", "~(@@ )~", "/(@@)/", "~(>O<)~", "~(@@)~??", ":(@@):",
+      "~(@@)~oO", "~~(@@)~~",
     ]) {
       expect(frameSequence.some((i) => minimalFrames[i].includes(face))).toBe(true);
     }
@@ -192,7 +195,19 @@ describe("getStatusFrames", () => {
     }
     const { frames, idleSequence, moveSequences } = getStatusFrames(octopus);
     moving(frames, idleSequence!, "idle");
-    moving(frames, moveSequences!.celebrate, "celebration");
+    for (const move of cued) moving(frames, moveSequences![move.name], move.name);
+  });
+
+  test("a move that needs a reason, like crying, never plays at random: only as a Gemini reaction", () => {
+    const { frames, minimalFrames, frameSequence, tiredSequence, moveSequences } = getStatusFrames(octopus, everyMove());
+    const choices = statusMoveChoices("octopus").map((m) => m.name);
+
+    for (const sequence of [frameSequence, tiredSequence!]) {
+      for (const mark of Object.values(cuedMarks)) expect(sequence.some((i) => frames[i].includes(mark)), mark).toBe(false);
+      expect(sequence.some((i) => minimalFrames[i].includes("~(;;)~"))).toBe(false);
+    }
+    for (const move of cued) expect(choices).toContain(move.name);
+    for (const [name, mark] of Object.entries(cuedMarks)) expect(moveSequences![name].some((i) => frames[i].includes(mark)), name).toBe(true);
   });
 
   test("a tired octopus sleeps or yawns in at least half of its moves, a rested one far less", () => {
