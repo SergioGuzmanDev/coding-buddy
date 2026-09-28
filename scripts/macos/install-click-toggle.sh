@@ -41,4 +41,4 @@ rm -f "$source_file"
 # Editing Info.plist breaks osacompile's signature; an unsigned edit is refused at launch.
 codesign --force --deep --sign - "$app"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
-echo "Registered coding-buddy:// -> $toggle, $reopen"
+echo "Registered coding-buddy:// -> $toggle, $bubble_click"
