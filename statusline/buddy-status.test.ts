@@ -737,6 +737,78 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, {}, { ...at, ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
     });
 
+    describe("under animate focused, the move and its mood wait for 3 seconds of focus after the reaction", () => {
+      const clock = Math.floor(Date.now() / 1000);
+      const red = "\x1b[38;2;255;0;0m";
+      const setup = () => {
+        const made = fixture({ moveSequences: { coffee: [3, 1] }, moodColors: { angry: ["#FF0000"] } }, { animate: "focused" });
+        const reaction = join(made.stateDir, "reaction.default.json");
+        const focus = join(made.stateDir, "focused-session");
+        const gate = join(made.stateDir, ".move_gate.default");
+        writeFileSync(focus, "BBB");
+        const react = (secondsAgo: number) => writeFileSync(reaction,
+          JSON.stringify({ reaction: "*sorbe*", timestamp: (clock - secondsAgo) * 1000, move: "coffee", mood: "angry" }));
+        const tick = (seconds: number, session = "w0t1p0:BBB") =>
+          render(made.configDir, {}, { BUDDY_FAKE_NOW: String(clock + seconds), ITERM_SESSION_ID: session });
+        const touch = (path: string, seconds: number) => utimesSync(path, clock + seconds, clock + seconds);
+        return { ...made, reaction, focus, gate, react, tick, touch };
+      };
+
+      test("already focused when it arrives, it starts 3 seconds after the reaction and plays for 30", () => {
+        const { reaction, focus, react, tick, touch } = setup();
+        react(1);
+        touch(focus, -100);
+        touch(reaction, -1);
+
+        expect(tick(0)).toContain("art-rest");
+        expect(tick(0)).not.toContain(red);
+        const started = tick(2);
+        expect(started).toContain("art-cheer");
+        expect(started).toContain(red);
+        expect(tick(3)).toContain("art-tired");
+        expect(tick(31)).toContain("art-tired");
+        expect(tick(32)).toContain("art-rest");
+      });
+
+      test("focused after it arrives, it counts 3 seconds from the first focused render, without rewriting its state meanwhile", () => {
+        const { reaction, focus, gate, react, tick, touch } = setup();
+        react(10);
+        touch(reaction, -10);
+        touch(focus, -5);
+
+        expect(tick(0)).toContain("art-rest");
+        touch(gate, -4);
+        expect(tick(2)).toContain("art-rest");
+        expect(Math.round(statSync(gate).mtimeMs / 1000)).toBe(clock - 4);
+        expect(tick(3)).toContain("art-cheer");
+      });
+
+      test("focus going away restarts the count, but not a move already playing", () => {
+        const { reaction, focus, gate, react, tick, touch } = setup();
+        react(10);
+        touch(reaction, -10);
+        touch(focus, -5);
+
+        expect(tick(0)).toContain("art-rest");
+        touch(gate, -3);
+        touch(focus, -2);
+        expect(tick(3)).toContain("art-rest");
+        expect(tick(6)).toContain("art-cheer");
+
+        touch(focus, 100);
+        expect(tick(7)).toContain("art-tired");
+      });
+
+      test("where focus is not tracked, it plays at once as before", () => {
+        const { stateDir, react, tick } = setup();
+        react(1);
+
+        expect(tick(0, "")).toContain("art-tired");
+        writeFileSync(join(stateDir, "config.json"), JSON.stringify({ statuslineDensity: "full", animate: true }));
+        expect(tick(0)).toContain("art-tired");
+      });
+    });
+
     test("paints the buddy, not its bubble, with the reaction's mood for 30 seconds, each color lasting 2 ticks", () => {
       const { configDir, stateDir } = fixture({ moodColors: { angry: ["#FF0000", ""] } });
       const clock = Math.floor(Date.now() / 1000);

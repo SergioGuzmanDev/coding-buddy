@@ -438,6 +438,7 @@ SWEAT_SHOWN_SECONDS=4
 TIRED_AT_5H_PCT=50
 ASLEEP_AFTER_IDLE_SECONDS=300
 REACTION_MOVE_SECONDS=30
+MOVE_AFTER_FOCUS_SECONDS=3
 SWEAT=false
 [ "$CONTEXT_PCT" -ge "$SWEAT_AT_CONTEXT_PCT" ] 2>/dev/null && SWEAT=true
 TIRED=false
@@ -455,12 +456,46 @@ if [ -f "$TRANSCRIPT" ] && [ $(( NOW - SUBSTATUS_MTIME )) -ge "$ASLEEP_AFTER_IDL
 elif [ "$TIRED" = true ]; then
     MOVE=tired
 fi
+# Sets _move_from to when the reaction's move starts: once this session has been focused for
+# MOVE_AFTER_FOCUS_SECONDS since the reaction, or -1 until then. Only called while animated under
+# "focused", which means focused; focused-session is rewritten on every focus change, so a copy newer
+# than the gate file means focus went away since the gate last recorded where it started.
+_move_after_focus() {
+    local gate_file="$BUDDY_STATE_DIR/.move_gate.$SID" focus_file="$BUDDY_STATE_DIR/focused-session"
+    local gate_ts="" gate_since="" gate_state="" since state=wait
+    [ -f "$gate_file" ] && { IFS= read -r gate_ts; IFS= read -r gate_since; IFS= read -r gate_state; } < "$gate_file"
+    case "$gate_since" in ''|*[!0-9]*) gate_ts="" ;; esac
+    if [ "$gate_ts" = "$TS" ] && [ "$gate_state" = open ]; then
+        _move_from=$(( gate_since + MOVE_AFTER_FOCUS_SECONDS ))
+        return
+    fi
+    if [ "$gate_ts" = "$TS" ] && ! [ "$focus_file" -nt "$gate_file" ]; then
+        since=$gate_since
+    elif [ "$focus_file" -nt "$REACTION_FILE" ]; then
+        since=$NOW
+    else
+        since=$(( TS / 1000 ))
+    fi
+    _move_from=-1
+    if [ $(( NOW - since )) -ge "$MOVE_AFTER_FOCUS_SECONDS" ]; then
+        state=open
+        _move_from=$(( since + MOVE_AFTER_FOCUS_SECONDS ))
+    fi
+    [ "$gate_ts $gate_since $gate_state" = "$TS $since $state" ] || printf '%s\n%s\n%s\n' "$TS" "$since" "$state" > "$gate_file"
+}
+
 # A frozen status line would keep the move's first frame, so only an animated one acts it out.
+# The move and its mood color share SINCE_REACTION, so both wait for focus together.
 SINCE_REACTION=-1
 case "$TS" in
     ''|*[!0-9]*) ;;
-    *) [ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE$REACTION_MOOD" ] && [ $(( NOW - TS / 1000 )) -lt "$REACTION_MOVE_SECONDS" ] \
-        && SINCE_REACTION=$(( NOW - TS / 1000 )) ;;
+    *) if [ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE$REACTION_MOOD" ]; then
+           _move_from=$(( TS / 1000 ))
+           [ "$_cfg_animate" = focused ] && [ -n "${ITERM_SESSION_ID:-}" ] && [ -f "$BUDDY_STATE_DIR/focused-session" ] \
+               && _move_after_focus
+           [ "$_move_from" -ge 0 ] && [ $(( NOW - _move_from )) -lt "$REACTION_MOVE_SECONDS" ] \
+               && SINCE_REACTION=$(( NOW - _move_from ))
+       fi ;;
 esac
 # The drop comes and goes while sweating. A frozen status line has no clock to blink by, so it keeps it.
 SWEAT_DRAWN=false
