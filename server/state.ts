@@ -381,6 +381,8 @@ export interface BuddyConfig {
   subStatusInline: boolean;
   expanded: boolean;
   clickToExpand: boolean;
+  /** No name row, and the bubble beside the art: "tight" keeps it as tall as the buddy, "bubble" one row taller with borders. */
+  slim: false | "tight" | "bubble";
   animate: boolean | "focused";
   rainbowColors?: string[];
   theme: "dark" | "light" | "auto";
@@ -410,6 +412,7 @@ const DEFAULT_CONFIG: BuddyConfig = {
   subStatusInline: false,
   expanded: false,
   clickToExpand: false,
+  slim: false,
   animate: true,
   theme: "auto",
   moodEnabled: true,

@@ -890,6 +890,82 @@ describe("buddy sub-status cache", () => {
   });
 });
 
+describe("slim layout", () => {
+  const octopus = ["            \n   .----.   \n  ( o  o )  \n  (______)  \n  TENTACLES "];
+
+  function render(config: Record<string, unknown>, reaction: string) {
+    const { configDir, stateDir } = createStatuslineFixture({
+      subStatusInline: true,
+      expanded: true,
+      clickToExpand: true,
+      subStatusCommand: "printf ignored",
+      slim: "tight",
+      ...config,
+    });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, level: 3, frames: octopus }));
+    writeFileSync(join(stateDir, ".substatus.default"), "LEFT-SIDE-STATUS\n");
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction, timestamp: Date.now() }));
+    const raw = runStatusline(configDir, "{}\n", "150").stdout.toString();
+    return { raw, plain: raw.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split("\n").filter(Boolean) };
+  }
+
+  test("keeps the panel as tall as the art: no name row, and a long reaction beside it", () => {
+    const reaction = "*Toma un café* mientras brilla en arcoíris; qué placer ver 7 mutaciones caer ante tests bien paridos, y además el refresh se respeta.";
+
+    const { raw, plain } = render({}, reaction);
+
+    expect(plain).toHaveLength(4);
+    expect(plain.at(-1)).toStartWith("LEFT-SIDE-STATUS");
+    expect(plain.at(-1)).toContain("TENTACLES");
+    expect(raw).not.toContain("Nimbus");
+    expect(raw).not.toContain("coding-buddy://toggle");
+    for (const word of reaction.split(" ")) expect(plain.join(" ")).toContain(word);
+    expect(plain[0]).toContain("/ *Toma");
+    expect(plain[1]).toContain("|--");
+  });
+
+  test("keeps the bordered bubble for a reaction that fits on one line", () => {
+    const { plain } = render({}, "hola");
+
+    expect(plain).toHaveLength(4);
+    expect(plain[0]).toContain(".---");
+    expect(plain[1]).toContain("| hola ");
+  });
+
+  test("bubble keeps the borders, fitting a long reaction in two lines one row above the art", () => {
+    const reaction = "*Toma un café* mientras brilla en arcoíris; qué placer ver 7 mutaciones caer ante tests bien paridos, y además el refresh se respeta.";
+
+    const { raw, plain } = render({ slim: "bubble" }, reaction);
+
+    expect(plain).toHaveLength(5);
+    expect(plain[0]).toContain(".---");
+    expect(plain[3]).toContain("'---");
+    expect(plain[1]).toContain("| *Toma");
+    expect(plain[2]).toContain("|--");
+    expect(plain[2]).toContain("( o  o )");
+    expect(plain.at(-1)).toStartWith("LEFT-SIDE-STATUS");
+    expect(raw).not.toContain("Nimbus");
+    for (const word of reaction.split(" ")) expect(plain.join(" ")).toContain(word);
+  });
+
+  test("bubble stays as tall as the art for a reaction that fits on one line", () => {
+    const { plain } = render({ slim: "bubble" }, "hola");
+
+    expect(plain).toHaveLength(4);
+    expect(plain[1]).toContain("| hola ");
+    expect(plain[2]).toContain("'---");
+  });
+
+  test("drops the name from the one-row buddy too", () => {
+    const { raw } = render({ expanded: false, statuslineDensity: "minimal" }, "hola");
+
+    expect(raw).toContain('"hola"');
+    expect(raw).not.toContain("Nimbus");
+    expect(raw).not.toContain("coding-buddy://toggle");
+  });
+});
+
 describe("statusline density", () => {
   function createDensityFixture(
     density: string,

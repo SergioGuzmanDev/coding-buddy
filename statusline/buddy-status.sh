@@ -101,12 +101,12 @@ _THEME="dark"
 if [ -f "$CONFIG_FILE" ]; then
     # try: a malformed rainbowColors must not blank every other setting read by the same jq.
     read_fields _cfg_theme _cfg_animate _color _bubble_color _cfg_hide_rarity _custom _cfg_inline _cfg_expanded \
-        _cfg_click _ttl _bw _bm _wa _density < <(jq -j '
+        _cfg_click _ttl _bw _bm _wa _density _cfg_slim < <(jq -j '
         (.theme // "auto"), (if .animate == null then "true" else (.animate | tostring) end),
         (.color // ""), (.bubbleColor // ""), (.showRarity == false), (try ((.rainbowColors // []) | @tsv) catch ""),
         (.subStatusInline // false), (.expanded // false), (.clickToExpand // false), (.reactionTTL // 900),
-        (.bubbleWidth // 44), (.bubbleMargin // 8), (.statuslineWidthAdjust // 0), (.statuslineDensity // "auto")
-        | tostring, "\u0000"' "$CONFIG_FILE" 2>/dev/null)
+        (.bubbleWidth // 44), (.bubbleMargin // 8), (.statuslineWidthAdjust // 0), (.statuslineDensity // "auto"),
+        (.slim // false) | tostring, "\u0000"' "$CONFIG_FILE" 2>/dev/null)
     [ "$_cfg_theme" = "light" ] && _THEME="light"
 fi
 
@@ -291,10 +291,12 @@ DENSITY="auto"
 SUBSTATUS_INLINE=0
 EXPANDED=0
 CLICK_TO_EXPAND=0
+SLIM=""
 if [ -f "$CONFIG_FILE" ]; then
     [ "$_cfg_inline" = "true" ] && SUBSTATUS_INLINE=1
     [ "$_cfg_expanded" = "true" ] && EXPANDED=1
     [ "$_cfg_click" = "true" ] && CLICK_TO_EXPAND=1
+    case "$_cfg_slim" in tight|bubble) SLIM="$_cfg_slim" ;; esac
     case "$_ttl" in ''|*[!0-9]*) ;; *) REACTION_TTL="$_ttl" ;; esac
     case "$_bw" in ''|*[!0-9]*) ;; *) INNER_W="$_bw" ;; esac
     case "$_bm" in ''|*[!0-9]*) ;; *) MARGIN="$_bm" ;; esac
@@ -499,6 +501,7 @@ case "$MOOD" in
     *)           MOOD_EMOJI="" ;;
 esac
 NAME_WITH_LEVEL="${NAME_WITH_LEVEL}${MOOD_EMOJI}"
+[ -n "$SLIM" ] && NAME_WITH_LEVEL=""
 NAME_LEN=${#NAME_WITH_LEVEL}
 ART_CENTER=6
 NAME_PAD=$(( ART_CENTER - NAME_LEN / 2 ))
@@ -533,7 +536,7 @@ for line in "${ART_LINES[@]}"; do
     fi
     _arc=$(( _arc + 1 ))
 done
-ALL_LINES+=("$NAME_LINE"); ALL_COLORS+=("$C")
+[ -n "$SLIM" ] || { ALL_LINES+=("$NAME_LINE"); ALL_COLORS+=("$C"); }
 
 ART_COUNT=${#ALL_LINES[@]}
 
@@ -694,7 +697,8 @@ if [ "$TIER" = "minimal" ]; then
         done
     fi
     [ -z "$_face_plain" ] && _face_plain=$'    (°°)    '
-    _min_plain="${_face_plain} ${NAME_WITH_LEVEL}"
+    _face_name="${_face_plain}${NAME_WITH_LEVEL:+ $NAME_WITH_LEVEL}"
+    _min_plain="$_face_name"
     _min_w=$(dwidth "$_min_plain")
     if [ -n "$REACTION" ]; then
         _react_plain=" │ \"${REACTION}\""
@@ -739,23 +743,59 @@ else
 fi
 
 # ─── Word-wrap bubble text ────────────────────────────────────────────────────
-TEXT_LINES=()
+WORDS=()
+WORD_WIDTHS=()
 if [ -n "$BUBBLE_TEXT" ]; then
     read -r -a WORDS <<< "$BUBBLE_TEXT"
-    CUR_LINE=""
-    CUR_W=0
     for word in "${WORDS[@]}"; do
-        word_w=$(dwidth "$word")
-        if [ -z "$CUR_LINE" ]; then
-            CUR_LINE="$word"; CUR_W=$word_w
-        elif [ $(( CUR_W + 1 + word_w )) -le $INNER_W ]; then
-            CUR_LINE="$CUR_LINE $word"; CUR_W=$(( CUR_W + 1 + word_w ))
+        WORD_WIDTHS+=("$(dwidth "$word")")
+    done
+fi
+
+# Sets TEXT_LINES to WORDS wrapped at $1 columns.
+wrap_words() {
+    local width="$1" i line="" line_w=0
+    TEXT_LINES=()
+    for i in "${!WORDS[@]}"; do
+        if [ -z "$line" ]; then
+            line="${WORDS[$i]}"; line_w=${WORD_WIDTHS[$i]}
+        elif [ $(( line_w + 1 + WORD_WIDTHS[i] )) -le "$width" ]; then
+            line="$line ${WORDS[$i]}"; line_w=$(( line_w + 1 + WORD_WIDTHS[i] ))
         else
-            TEXT_LINES+=("$CUR_LINE")
-            CUR_LINE="$word"; CUR_W=$word_w
+            TEXT_LINES+=("$line")
+            line="${WORDS[$i]}"; line_w=${WORD_WIDTHS[$i]}
         fi
     done
-    [ -n "$CUR_LINE" ] && TEXT_LINES+=("$CUR_LINE")
+    [ -n "$line" ] && TEXT_LINES+=("$line")
+}
+wrap_words "$INNER_W"
+
+# Widens INNER_W, up to MAX_INNER, until the text wraps into at most $1 lines. It starts from the
+# narrowest width that could fit, since each step re-wraps every word.
+widen_to_lines() {
+    local lines="$1" one_line_w=$(( ${#WORDS[@]} - 1 )) word_w fit_w
+    [ "$lines" -gt 0 ] && [ "${#TEXT_LINES[@]}" -gt "$lines" ] || return 0
+    for word_w in "${WORD_WIDTHS[@]}"; do one_line_w=$(( one_line_w + word_w )); done
+    fit_w=$(( one_line_w / lines ))
+    [ "$fit_w" -gt "$MAX_INNER" ] && fit_w="$MAX_INNER"
+    [ "$fit_w" -gt "$INNER_W" ] && INNER_W="$fit_w" && wrap_words "$INNER_W"
+    while [ "${#TEXT_LINES[@]}" -gt "$lines" ] && [ "$INNER_W" -lt "$MAX_INNER" ]; do
+        INNER_W=$(( INNER_W + 1 ))
+        wrap_words "$INNER_W"
+    done
+}
+
+# Slim fits the bubble in the art's rows above an inline sub-status: "tight" drops the borders of a
+# bubble too tall for them, "bubble" keeps them and takes one row more.
+BUBBLE_ROUND=0
+if [ -n "$SLIM" ] && [ "${#TEXT_LINES[@]}" -gt 0 ]; then
+    _bubble_rows=$(( ART_COUNT - SUBSTATUS_INLINE ))
+    if [ "$SLIM" = "bubble" ]; then
+        widen_to_lines $(( _bubble_rows - 1 ))
+    elif [ $(( ${#TEXT_LINES[@]} + 2 )) -gt "$_bubble_rows" ]; then
+        BUBBLE_ROUND=1
+        widen_to_lines "$_bubble_rows"
+    fi
 fi
 
 TEXT_COUNT=${#TEXT_LINES[@]}
@@ -766,21 +806,35 @@ BOX_W=$(( INNER_W + 4 ))
 BUBBLE_LINES=()
 BUBBLE_TYPES=()  # "border" or "text" — determines coloring
 if [ $TEXT_COUNT -gt 0 ]; then
-    # Top border
     BORDER=$(printf '%*s' "$(( BOX_W - 2 ))" '' | tr ' ' '-')
-    BUBBLE_LINES+=(".${BORDER}.")
-    BUBBLE_TYPES+=("border")
-    # Text rows: "| text padded |"
-    for tl in "${TEXT_LINES[@]}"; do
+    _top=".${BORDER}."
+    _bottom="\`${BORDER}'"
+    [ "$SLIM" = "bubble" ] && _bottom="'${BORDER}'"
+    if [ "$BUBBLE_ROUND" -eq 0 ]; then
+        BUBBLE_LINES+=("$_top")
+        BUBBLE_TYPES+=("border")
+    fi
+    # Text rows: "| text padded |", or rounded ends "/ ... \" to "\ ... /" without borders.
+    _last_text=$(( TEXT_COUNT - 1 ))
+    for _ti in "${!TEXT_LINES[@]}"; do
+        tl="${TEXT_LINES[$_ti]}"
         tpad=$(( INNER_W - $(dwidth "$tl") ))
         [ "$tpad" -lt 0 ] && tpad=0
         padding=$(printf '%*s' "$tpad" '')
-        BUBBLE_LINES+=("| ${tl}${padding} |")
+        edges="||"
+        if [ "$BUBBLE_ROUND" -eq 1 ]; then
+            case "$_ti" in
+                "$_last_text") [ "$TEXT_COUNT" -eq 1 ] && edges="()" || edges='\/' ;;
+                0) edges='/\' ;;
+            esac
+        fi
+        BUBBLE_LINES+=("${edges:0:1} ${tl}${padding} ${edges:1:1}")
         BUBBLE_TYPES+=("text")
     done
-    # Bottom border
-    BUBBLE_LINES+=("\`${BORDER}'")
-    BUBBLE_TYPES+=("border")
+    if [ "$BUBBLE_ROUND" -eq 0 ]; then
+        BUBBLE_LINES+=("$_bottom")
+        BUBBLE_TYPES+=("border")
+    fi
 fi
 
 BUBBLE_COUNT=${#BUBBLE_LINES[@]}
@@ -835,11 +889,15 @@ fi
 # ─── Find the connector line (middle text line → points to buddy's mouth) ─────
 # The connector goes on the middle text row of the bubble
 CONNECTOR_BI=-1
-if [ $BUBBLE_COUNT -gt 2 ]; then
+if [ "$BUBBLE_ROUND" -eq 1 ]; then
+    CONNECTOR_BI=$(( BUBBLE_COUNT / 2 ))
+elif [ $BUBBLE_COUNT -gt 2 ]; then
     # text rows are indices 1..(BUBBLE_COUNT-2), pick the middle one
     FIRST_TEXT=1
     LAST_TEXT=$(( BUBBLE_COUNT - 2 ))
     CONNECTOR_BI=$(( (FIRST_TEXT + LAST_TEXT) / 2 ))
+    # The extra row "bubble" takes pushes the art down, so the face sits by the lower middle line.
+    [ "$SLIM" = "bubble" ] && CONNECTOR_BI=$(( (FIRST_TEXT + LAST_TEXT + 1) / 2 ))
 fi
 
 # ─── Output: merged bubble box + art per line ──────────────────────────────────
@@ -1016,7 +1074,7 @@ inline_substatus_row() {
     read_single_substatus || return 0
     local left="$SUBSTATUS_LEFT"
     room=$(( STATUSLINE_BUDGET - SUBSTATUS_LEFT_W - 2 ))
-    buddy="${_face_plain} ${NAME_WITH_LEVEL}"
+    buddy="$_face_name"
     buddy_w=$(dwidth "$buddy")
     [ "$buddy_w" -le "$room" ] || return 0
     text_room=$(( room - buddy_w - 5 ))
@@ -1051,7 +1109,7 @@ fi
 
 # cmd+click on the name opens coding-buddy://toggle, which the URL handler from
 # scripts/macos/install-click-toggle.sh routes to toggle-expanded.sh.
-if [ "$CLICK_TO_EXPAND" -eq 1 ]; then
+if [ "$CLICK_TO_EXPAND" -eq 1 ] && [ -n "$NAME_WITH_LEVEL" ]; then
     _name_link=$'\033]8;;coding-buddy://toggle\033\\'"${NAME_WITH_LEVEL}"$'\033]8;;\033\\'
     for _i in "${!OUTPUT_LINES[@]}"; do
         _row="${OUTPUT_LINES[$_i]}"
