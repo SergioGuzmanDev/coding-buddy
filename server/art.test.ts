@@ -135,6 +135,9 @@ describe("getStatusFrames", () => {
   const marks = {
     cigarette: "(______)===*", pipe: "(______)___u", wave: "(______)__/", jump: "' '' '", coffee: "c[_]",
     sleep: "( -  - ) z", look: "(@  @  )", dance: "   (______)", yawn: "(__O___)",
+    think: "?", idea: "\\!/", love: "<3", cry: "( T  T )", fume: "'.----.'", dizzy: "( o  O )", wink: "( @  - )",
+    shrug: "\\_(______)_/", panic: "/( O  O )\\", gasp: "!!", blush: "( >//< )", ink: "%%%", camouflage: "(::::::)",
+    bubbles: "(______)o", peek: "~~~~~~", squash: "__*",
   };
   const acting = (frame: string) => Object.values(marks).some((mark) => frame.includes(mark));
 
@@ -152,13 +155,27 @@ describe("getStatusFrames", () => {
       expect(frameSequence.slice(slot * 30, slot * 30 + 30).some((i) => acting(frames[i]))).toBe(true);
     }
     for (const mark of Object.values(marks)) expect(frameSequence.some((i) => frames[i].includes(mark))).toBe(true);
-    for (const face of [" *===~(", " u___~(", ")~/", "_(@@)_", "c[_]", "~(--)~z", "~(@@ )~", "/(@@)/", "~(>O<)~"]) {
+    for (const face of [
+      " *===~(", " u___~(", ")~/", "_(@@)_", "c[_]", "~(--)~z", "~(@@ )~", "/(@@)/", "~(>O<)~", "~(@@)~??", "\\!/", "~(^^)~<3",
+      "~(;;)~", "' (><) '", "*(oO)+", "~(@-)~*", "\\_(@@)_/", "/(OO)\\", "~(oo)~!!", "~(>//<)~", "%%@%@%%", ":(@@):",
+      "~(@@)~oO", "~~(@@)~~", "~(^^)~_*",
+    ]) {
       expect(frameSequence.some((i) => minimalFrames[i].includes(face))).toBe(true);
     }
     expect(frameSequence.filter((i) => acting(frames[i])).length).toBeLessThanOrEqual(frameSequence.length / 2);
 
     const cigarettesOnly = getStatusFrames(octopus, () => 0);
     expect(cigarettesOnly.frameSequence.some((i) => Object.values(marks).slice(1).some((m) => cigarettesOnly.frames[i].includes(m)))).toBe(false);
+  });
+
+  test("no move makes the octopus take more room: 14 columns by 5 rows, and 11 columns on one row", () => {
+    const { frames, minimalFrames } = getStatusFrames(octopus);
+
+    for (const frame of frames) {
+      expect(frame.split("\n")).toHaveLength(5);
+      for (const line of frame.split("\n")) expect(displayWidth(line), JSON.stringify(frame)).toBeLessThanOrEqual(14);
+    }
+    for (const face of minimalFrames) expect(displayWidth(face), face).toBeLessThanOrEqual(11);
   });
 
   test("every octopus move still moves when the status line samples every other second", () => {
