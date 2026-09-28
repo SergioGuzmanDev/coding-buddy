@@ -136,11 +136,13 @@ describe("getStatusFrames", () => {
   const poolMarks = {
     cigarette: "(______)===*", pipe: "(______)___u", wave: "(______)__/", jump: "' '' '", coffee: "c[_]",
     sleep: "( -  - ) z", look: "(@  @  )", dance: "   (______)", yawn: "(__O___)",
-    think: "?", camouflage: "(::::::)", bubbles: "(______)o", peek: "~~~~~~",
+    think: "?", camouflage: "(::::::)", bubbles: "(______)o", peek: "~~~~~~", fish: "<><", stretch: "-(______)-",
+    read: "[====]", typing: "[########]",
   };
   const cuedMarks = {
     idea: "\\!/", love: "<3", cry: "( T  T )", fume: "'.----.'", dizzy: "( o  O )", wink: "( @  - )",
     shrug: "\\_(______)_/", panic: "/( O  O )\\", gasp: "!!", blush: "( >//< )", ink: "%%%", squash: "__*",
+    facepalm: "(//////)", clap: "(__><__)", nod: "( v  v )", headshake: "( =  = )", salute: ".----.__",
   };
   const marks = { ...poolMarks, ...cuedMarks };
   const acting = (frame: string) => Object.values(marks).some((mark) => frame.includes(mark));
@@ -161,7 +163,7 @@ describe("getStatusFrames", () => {
     for (const mark of Object.values(poolMarks)) expect(frameSequence.some((i) => frames[i].includes(mark))).toBe(true);
     for (const face of [
       " *===~(", " u___~(", ")~/", "_(@@)_", "c[_]", "~(--)~z", "~(@@ )~", "/(@@)/", "~(>O<)~", "~(@@)~??", ":(@@):",
-      "~(@@)~oO", "~~(@@)~~",
+      "~(@@)~oO", "~~(@@)~~", "~(@@)~ <><", "--(><)--", "~(. .)[==]", "~(@@)/[#]",
     ]) {
       expect(frameSequence.some((i) => minimalFrames[i].includes(face))).toBe(true);
     }
@@ -236,6 +238,10 @@ describe("getStatusFrames", () => {
   test("each move Gemini can pick has its own sequence, drawn from that move's frames", () => {
     const { frames, moveSequences } = getStatusFrames(octopus);
     const choices = statusMoveChoices("octopus");
+
+    expect(Object.keys(marks).sort(), "every move needs a mark for the tests above").toEqual(
+      choices.map((m) => m.name).filter((name) => name !== "celebrate").sort(),
+    );
 
     expect(Object.keys(moveSequences!).sort()).toEqual(choices.map((m) => m.name).sort());
     expect(new Set(choices.map((m) => m.name)).size).toBe(choices.length);
