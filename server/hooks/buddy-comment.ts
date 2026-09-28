@@ -187,7 +187,7 @@ function findFreshToolReaction(
 
 // reaction.<sid>.json and .last_comment.<sid> are absent: the status line expires those by reactionTTL.
 const SESSION_FILE =
-  /^\.(substatus|substatus-sweep|render|signals|move_gate|last_stop_hook|last_reaction|last_mood|last_bad|error_streak|session_start)\.([^.]+)(\.lock)?$/;
+  /^\.(substatus|substatus-sweep|render|signals|move_gate|worry_told|last_stop_hook|last_reaction|last_mood|last_bad|error_streak|session_start)\.([^.]+)(\.lock)?$/;
 const TMP_LEFTOVER = /^(\.[a-z_-]+\.[^.]+|reaction\.[^.]+\.json)\.tmp(\.|$)/;
 const TMP_LEFTOVER_AGE_MS = 60 * 60_000;
 // A day would also catch an unfocused tab left overnight, whose rebuilt render cache then lacks the sub-status row.
