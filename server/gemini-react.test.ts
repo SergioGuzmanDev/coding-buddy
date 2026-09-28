@@ -38,6 +38,17 @@ function fakeGemini(body: string): string {
   return bin;
 }
 
+/** agy that reports a spent quota, as it logs it, unless it runs under the second account's HOME. */
+function spentFirstAccount(secondHome: string): string {
+  return `
+    log=""; prev=""; for a in "$@"; do [ "$prev" = "--log-file" ] && log="$a"; prev="$a"; done
+    if [ "$HOME" != "${secondHome}" ]; then
+      echo 'attempt 1 failed (RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h0m5s.)' > "$log"
+      echo '{"error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached."}'; exit 1
+    fi
+    cat "${root}/out.json"`;
+}
+
 function callCount(): number {
   try {
     return readFileSync(join(root, "calls.log"), "utf8").trim().split("\n").length;
@@ -185,26 +196,18 @@ describe("gemini-react", () => {
     expect(prompt(60)).toContain("You are sweating");
   });
 
-  test("uses the Gemini API key in its own home once the signed-in quota is spent, until that quota resets", () => {
-    writeFileSync(join(stateDir, "gemini-api-key"), "test-key\n");
-    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks* from the key" }));
-    const bin = fakeGemini(`
-      log=""; prev=""; for a in "$@"; do [ "$prev" = "--log-file" ] && log="$a"; prev="$a"; done
-      if [ -z "$GEMINI_API_KEY" ]; then
-        echo 'attempt 1 failed (RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h0m5s.)' > "$log"
-        echo '{"error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached."}'; exit 1
-      fi
-      echo "$HOME $GEMINI_API_KEY" > "${root}/key-run.log"
-      cat "${root}/out.json"`);
+  test("asks the second account in its own home once the first one's quota is spent, until that quota resets", () => {
+    const home = join(stateDir, "gemini-fallback-home");
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+    writeFileSync(join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "{}");
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks* from the second account" }));
+    const bin = fakeGemini(spentFirstAccount(home));
     let clock = 1_000_000;
     const react = () => reactWithGemini("reply", "ask", { bin, now: () => clock });
 
     react();
-    expect(bubble().reaction).toBe("*quacks* from the key");
+    expect(bubble().reaction).toBe("*quacks* from the second account");
     expect(callCount()).toBe(2);
-    const home = join(stateDir, "gemini-api-home");
-    expect(readFileSync(join(root, "key-run.log"), "utf8")).toBe(`${home} test-key\n`);
-    expect(JSON.parse(readFileSync(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8"))).toEqual({ modelProvider: "gemini" });
 
     clock += (2 * 3600 + 4) * 1000;
     react();
@@ -213,6 +216,16 @@ describe("gemini-react", () => {
     clock += 2000;
     react();
     expect(callCount()).toBe(5);
+  });
+
+  test("never runs a second account that is not signed in", () => {
+    const home = join(stateDir, "gemini-fallback-home");
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+
+    reactWithGemini("reply", "ask", { bin: fakeGemini(spentFirstAccount(home)) });
+
+    expect(callCount()).toBe(1);
+    expect(bubble().reaction).toContain("RESOURCE_EXHAUSTED");
   });
 
   test("says it is sleeping when the agy CLI is missing", () => {

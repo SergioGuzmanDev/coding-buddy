@@ -191,21 +191,13 @@ interface GeminiAccount {
   agyDir: string;
 }
 
-/** A Gemini API key has a free quota of its own; its own HOME keeps agy's signed-in account and settings untouched. */
-function apiKeyAccount(stateDir: string): GeminiAccount | undefined {
-  let key = "";
-  try {
-    key = readFileSync(join(stateDir, "gemini-api-key"), "utf8").trim();
-  } catch {
-    return undefined;
-  }
-  if (!key) return undefined;
-  const home = join(stateDir, "gemini-api-home");
+/** A second account, signed in once with `HOME=<its home> agy`: that HOME hides the macOS Keychain, so agy keeps it in a file. */
+function fallbackAccount(stateDir: string): GeminiAccount | undefined {
+  const home = join(stateDir, "gemini-fallback-home");
   const agyDir = join(home, ".gemini", "antigravity-cli");
-  mkdirSync(agyDir, { recursive: true });
-  const settings = join(agyDir, "settings.json");
-  if (!existsSync(settings)) writeFileSync(settings, JSON.stringify({ modelProvider: "gemini" }));
-  return { env: { ...process.env, HOME: home, GEMINI_API_KEY: key }, agyDir };
+  // Signed out, agy would open a browser sign-in on every turn.
+  if (!existsSync(join(agyDir, "antigravity-oauth-token"))) return undefined;
+  return { env: { ...process.env, HOME: home }, agyDir };
 }
 
 // agy retries a spent quota for over a minute and its reply may never come, so the log is where the quota shows.
@@ -312,17 +304,17 @@ export function reactWithGemini(
       return answer;
     };
     const signedIn: GeminiAccount = { agyDir: runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli") };
-    const apiKey = apiKeyAccount(stateDir);
+    const fallback = fallbackAccount(stateDir);
     const quotaFile = join(stateDir, ".gemini_quota.json");
     let answer: GeminiAnswer;
-    if (apiKey && spentUntil(quotaFile) > now()) {
-      answer = ask(apiKey);
+    if (fallback && spentUntil(quotaFile) > now()) {
+      answer = ask(fallback);
     } else {
       answer = ask(signedIn);
       const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
       if (resetsIn) {
         writeFileSync(quotaFile, JSON.stringify({ until: now() + resetsIn }));
-        if (apiKey) answer = ask(apiKey);
+        if (fallback) answer = ask(fallback);
       }
     }
     if ("reaction" in answer) {
