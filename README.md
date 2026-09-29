@@ -1,3 +1,6 @@
+> **This is Sergio's fork.** Install it with [INSTALL.md](INSTALL.md), not with the Quick Start below,
+> which installs the original project without the fork's changes.
+
 <div align="center">
 
 <!-- ============================================================ -->
