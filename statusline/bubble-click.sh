@@ -14,8 +14,14 @@ ts=$(jq -r '.timestamp // empty' "$BUDDY_STATE_DIR/reaction.$sid.json" 2>/dev/nu
 at=$(date +%s)
 # A replay gives way to the moves that come up meanwhile, so the status line has to tell it from a first play.
 state=replay
-# A window that opened at the epoch ended long ago, so the status line draws the bubble closed.
-[ "$action" = close ] && { at=0; state=open; }
 gate="$BUDDY_STATE_DIR/.move_gate.$sid"
+held=""
+[ -f "$gate" ] && { IFS= read -r _; IFS= read -r _; IFS= read -r held; } < "$gate"
+# A window that opened at the epoch ended long ago, so the status line draws the bubble closed. Closing a
+# bubble that a newer reaction waits behind opens that one instead.
+if [ "$action" = close ]; then
+    state=open
+    [ "$held" = hold ] || at=0
+fi
 # The status line reads the gate on every tick, so it must never see a half-written file.
 printf '%s\n%s\n%s\n' "$ts" "$at" "$state" > "$gate.tmp.$$" && mv "$gate.tmp.$$" "$gate"

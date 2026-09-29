@@ -952,7 +952,7 @@ describe("buddy sub-status cache", () => {
         expect(tick(click - clock + 5)).toContain("art-tired");
       });
 
-      test("a new reaction during a replay plays its own move once focused for 3 seconds", () => {
+      test("a new reaction during a replay waits for the replayed bubble to be read, then plays its own move", () => {
         const { reaction, focus, gate, react, tick, touch, reopen } = setup(
           { clickToExpand: true },
           { moveSequences: { coffee: [3, 1], stretch: [2] } },
@@ -965,10 +965,78 @@ describe("buddy sub-status cache", () => {
         const now = Number(readFileSync(gate, "utf8").split("\n")[1]) - clock;
         expect(tick(now)).toContain("art-cheer");
 
-        react(-(now + 1), { move: "stretch" });
+        react(-(now + 1), { reaction: "*glup*", move: "stretch" });
         touch(reaction, now + 1);
-        expect(tick(now + 2)).toContain("art-rest");
-        expect(tick(now + 4)).toContain("art-asleep");
+        const held = tick(now + 2);
+        expect(held).toContain("*sorbe*");
+        expect(held).not.toContain("*glup*");
+        expect(held).toContain("art-cheer");
+        expect(tick(now + 5)).toContain("*sorbe*");
+        const shown = tick(now + 6);
+        expect(shown).toContain("*glup*");
+        expect(shown).toContain("art-asleep");
+      });
+
+      describe("a reaction that arrives while the bubble before it is being read", () => {
+        const opened = () => {
+          const made = setup({ clickToExpand: true }, { moveSequences: { coffee: [3, 1], stretch: [2] } });
+          made.react(1);
+          made.touch(made.focus, -100);
+          made.touch(made.reaction, -1);
+          expect(made.tick(2)).toContain("art-cheer");
+          return made;
+        };
+        const arrive = (made: ReturnType<typeof opened>, seconds: number) => {
+          made.react(-seconds, { reaction: "*glup*", move: "stretch" });
+          made.touch(made.reaction, seconds);
+        };
+
+        test("waits 5 seconds behind it, then shows with its own move for 15 seconds", () => {
+          const made = opened();
+          arrive(made, 5);
+
+          const held = made.tick(5);
+          expect(held).toContain("*sorbe*");
+          expect(held).not.toContain("*glup*");
+          expect(held).toContain("art-tired");
+          expect(held).toContain(red);
+          expect(made.tick(9)).toContain("*sorbe*");
+          const shown = made.tick(10);
+          expect(shown).toContain("*glup*");
+          expect(shown).toContain("art-asleep");
+          expect(shown).not.toContain(red);
+          expect(made.tick(24)).toContain("*glup*");
+          expect(made.tick(25)).not.toContain("*glup*");
+        });
+
+        test("never keeps that bubble past its own 15 seconds", () => {
+          const made = opened();
+          arrive(made, 14);
+
+          expect(made.tick(16)).toContain("*sorbe*");
+          expect(made.tick(17)).toContain("*glup*");
+        });
+
+        test("shows at once when closing that bubble", () => {
+          const made = opened();
+          arrive(made, 5);
+          expect(made.tick(5)).toContain("*sorbe*");
+
+          expect(made.reopen("coding-buddy://close/default").status).toBe(0);
+          const shown = made.tick(Math.floor(Date.now() / 1000) - clock);
+          expect(shown).toContain("*glup*");
+          expect(shown).toContain("art-asleep");
+        });
+
+        test("takes over at once when focus came to the session after it arrived", () => {
+          const made = opened();
+          arrive(made, 5);
+          made.touch(made.focus, 6);
+
+          const shown = made.tick(6);
+          expect(shown).toContain("*glup*");
+          expect(shown).not.toContain("*sorbe*");
+        });
       });
 
       test("a reopened reaction without a move or mood just shows its bubble", () => {

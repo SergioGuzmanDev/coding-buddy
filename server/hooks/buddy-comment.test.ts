@@ -363,6 +363,7 @@ describe("stale session file sweep", () => {
       file(dir, ".signals.gone5678", 8 * DAY),
       file(dir, ".move_gate.gone5678", 8 * DAY),
       file(dir, ".worry_told.gone5678", 8 * DAY),
+      file(dir, ".shown_reaction.gone5678", 8 * DAY),
       file(dir, ".substatus.live1234.tmp", 2 * 60 * 60_000),
       file(dir, "reaction.live1234.json.tmp.1.2", 2 * 60 * 60_000),
     ];

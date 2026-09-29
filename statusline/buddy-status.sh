@@ -88,23 +88,28 @@ read_fields() {
 # array so a malformed field there cannot shift the values after it.
 # The level comes from xp.json because awarding XP rewrites only that file; the copy in status.json
 # is as old as the last buddy tool call. It is read raw so a damaged xp.json cannot blank the buddy.
-# The same jq reads config.json and this session's reaction, each parsed on its own so a damaged one
-# only falls back to its defaults; try keeps a malformed rainbowColors from blanking the other settings.
+# The same jq reads config.json, this session's reaction and the copy of the one its bubble last showed,
+# each parsed on its own so a damaged one only falls back to its defaults; try keeps a malformed
+# rainbowColors from blanking the other settings.
 _xp_file="$BUDDY_STATE_DIR/xp.json"
 [ -f "$_xp_file" ] || _xp_file=/dev/null
 _config_path="$CONFIG_FILE"
 [ -f "$_config_path" ] || _config_path=/dev/null
 _reaction_path="$REACTION_FILE"
 [ -f "$_reaction_path" ] || _reaction_path=/dev/null
+SHOWN_FILE="$BUDDY_STATE_DIR/.shown_reaction.$SID"
+_shown_path="$SHOWN_FILE"
+[ -f "$_shown_path" ] || _shown_path=/dev/null
 read_fields EPOCH_NOW MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD \
     TRANSCRIPT CONTEXT_PCT USAGE_5H_PCT \
     _cfg_theme _cfg_animate _color _bubble_color _cfg_hide_rarity _custom _cfg_inline _cfg_expanded \
     _cfg_click _ttl _bw _bm _wa _density _cfg_slim SUBSTATUS_COMMAND SUBSTATUS_REFRESH_SECONDS \
-    REACTION TS REACTION_MOVE REACTION_MOOD < <(jq -j --arg input "$BUDDY_STATUSLINE_INPUT" --rawfile xp "$_xp_file" \
-        --rawfile config "$_config_path" --rawfile reaction "$_reaction_path" '
+    REACTION TS REACTION_MOVE REACTION_MOOD SHOWN_REACTION SHOWN_TS SHOWN_MOVE SHOWN_MOOD \
+    < <(jq -j --arg input "$BUDDY_STATUSLINE_INPUT" --rawfile xp "$_xp_file" \
+        --rawfile config "$_config_path" --rawfile reaction "$_reaction_path" --rawfile shown "$_shown_path" '
     def pct: if type == "number" then floor else 0 end;
     def object($raw): (try ($raw | fromjson) catch null) | if type == "object" then . else null end;
-    object($config) as $c | object($reaction) as $r
+    object($config) as $c | object($reaction) as $r | object($shown) as $s
     | (now | floor), (.muted // false), (.name // ""), (.rarity // "common"), (.stars // ""), (.shiny // false),
     (.achievement // ""), (if has("achievementAt") then (.achievementAt // 0) else "absent" end),
     ((try ($xp | fromjson | .level) catch null) // .level // 1), (.mood // "focused"),
@@ -115,7 +120,8 @@ read_fields EPOCH_NOW MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT L
     ($c.subStatusInline // false), ($c.expanded // false), ($c.clickToExpand // false), ($c.reactionTTL // 900),
     ($c.bubbleWidth // 44), ($c.bubbleMargin // 8), ($c.statuslineWidthAdjust // 0), ($c.statuslineDensity // "auto"),
     ($c.slim // false), ($c.subStatusCommand // ""), ($c.subStatusRefreshSeconds // ""),
-    ($r.reaction // ""), ($r.timestamp // 0), ($r.move // ""), ($r.mood // "")
+    ($r.reaction // ""), ($r.timestamp // 0), ($r.move // ""), ($r.mood // ""),
+    ($s.reaction // ""), ($s.timestamp // 0), ($s.move // ""), ($s.mood // "")
     | tostring, "\u0000"' "$STATE" 2>/dev/null)
 [ "$MUTED" = "true" ] && exit 0
 [ -z "$NAME" ] && exit 0
@@ -421,21 +427,24 @@ fi
 REACTION_MOVE_SECONDS=30
 MOVE_AFTER_FOCUS_SECONDS=3
 BUBBLE_FOCUSED_SECONDS=15
+READ_ON_SECONDS=5
 # Under animate "focused" in iTerm2 a reaction waits to be looked at: its bubble, move and mood last
 # BUBBLE_FOCUSED_SECONDS from 3 s of focus, then the bubble closes, reopenable until the next reaction.
+# One that arrives while the bubble before it is being read waits up to READ_ON_SECONDS behind it.
 GATED=0
 [ "$_cfg_animate" = focused ] && [ -n "${ITERM_SESSION_ID:-}" ] && [ -f "$BUDDY_STATE_DIR/focused-session" ] \
     && [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [[ "$TS" =~ ^[0-9]+$ ]] && GATED=1
 
 # Sets _move_from to when the reaction's bubble, move and mood started counting BUBBLE_FOCUSED_SECONDS,
 # or -1 while it waits for MOVE_AFTER_FOCUS_SECONDS of focus. The gate file holds the reaction, the second
-# it counts from (focus start while waiting, window start once open) and the state; bubble-click.sh
-# writes it open. focused-session is rewritten on every focus change, so a copy newer than the gate file
-# means focus went away since the gate last recorded where it started. Only a focused session advances it.
+# it counts from (focus start while waiting, window start once open, hold end while held) and the state;
+# bubble-click.sh writes it open. While held, a fourth line keeps when the bubble being read opened.
+# focused-session is rewritten on every focus change, so a copy newer than the gate file means focus went
+# away since the gate last recorded where it started. Only a focused session advances it.
 _reaction_gate() {
     local gate_file="$BUDDY_STATE_DIR/.move_gate.$SID" focus_file="$BUDDY_STATE_DIR/focused-session"
-    local gate_ts="" gate_at="" gate_state="" since at state=wait
-    [ -f "$gate_file" ] && { IFS= read -r gate_ts; IFS= read -r gate_at; IFS= read -r gate_state; } < "$gate_file"
+    local gate_ts="" gate_at="" gate_state="" gate_from="" since at state=wait hold_end="" read_from
+    [ -f "$gate_file" ] && { IFS= read -r gate_ts; IFS= read -r gate_at; IFS= read -r gate_state; IFS= read -r gate_from; } < "$gate_file"
     case "$gate_at" in ''|*[!0-9]*) gate_ts="" ;; esac
     _move_from=-1
     if [ "$gate_ts" = "$TS" ] && { [ "$gate_state" = open ] || [ "$gate_state" = replay ]; }; then
@@ -443,9 +452,27 @@ _reaction_gate() {
         [ "$gate_state" = replay ] && REPLAY=true
         return
     fi
+    if [ "$gate_state" = hold ] && [[ "$gate_from" =~ ^[0-9]+$ ]]; then
+        hold_end=$gate_at read_from=$gate_from
+    elif [ "$ANIMATE" -eq 1 ] && [ "$gate_ts" != "$TS" ] && [ "$gate_ts" = "$SHOWN_TS" ] \
+        && { [ "$gate_state" = open ] || [ "$gate_state" = replay ]; } && ! [ "$focus_file" -nt "$REACTION_FILE" ]; then
+        read_from=$gate_at
+        hold_end=$(( TS / 1000 + READ_ON_SECONDS ))
+        [ "$hold_end" -le $(( gate_at + BUBBLE_FOCUSED_SECONDS )) ] || hold_end=$(( gate_at + BUBBLE_FOCUSED_SECONDS ))
+    fi
+    if [ -n "$hold_end" ] && [ -n "$SHOWN_REACTION" ] && [ "$NOW" -lt "$hold_end" ]; then
+        [ "$gate_ts $gate_at $gate_state $gate_from" = "$TS $hold_end hold $read_from" ] \
+            || printf '%s\n%s\n%s\n%s\n' "$TS" "$hold_end" hold "$read_from" > "$gate_file"
+        HOLDING=1
+        _move_from=$read_from
+        REACTION=$SHOWN_REACTION REACTION_MOVE=$SHOWN_MOVE REACTION_MOOD=$SHOWN_MOOD
+        return
+    fi
     [ "$ANIMATE" -eq 1 ] || return 0
     if [ "$gate_ts" = "$TS" ] && ! [ "$focus_file" -nt "$gate_file" ]; then
         since=$gate_at
+        # Whoever stayed through the hold has been looking at the status line, so the reaction opens as it ends.
+        [ "$gate_state" = hold ] && since=$(( gate_at - MOVE_AFTER_FOCUS_SECONDS ))
     elif [ "$focus_file" -nt "$REACTION_FILE" ]; then
         since=$NOW
     else
@@ -463,6 +490,7 @@ _reaction_gate() {
 BUBBLE_CLOSED=0
 BUBBLE_COUNTDOWN=0
 REPLAY=false
+HOLDING=0
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
     FRESH=0
     if [ "$GATED" -eq 1 ]; then
@@ -491,6 +519,11 @@ if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; the
     elif [ "$BUBBLE_CLOSED" -eq 0 ]; then
         rm -f "$REACTION_FILE" 2>/dev/null
     fi
+fi
+# The next reaction overwrites the reaction file, so an open bubble keeps a copy to stay up behind it.
+if [ "$BUBBLE_COUNTDOWN" -eq 1 ] && [ "$HOLDING" -eq 0 ] && [ "$SHOWN_TS" != "$TS" ]; then
+    IFS= read -r -d '' _shown < "$REACTION_FILE"
+    printf '%s' "$_shown" > "$SHOWN_FILE"
 fi
 [ "$BUBBLE_CLOSED" -eq 1 ] && REACTION=""
 # The name closes the bubble or reopens it, so its link carries a session id that must be safe inside a URL.
