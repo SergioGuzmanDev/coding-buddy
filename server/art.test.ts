@@ -204,7 +204,7 @@ describe("getStatusFrames", () => {
     for (const move of cued) moving(frames, moveSequences![move.name], move.name);
   });
 
-  test("a move that needs a reason, like crying, never plays at random: only as a Gemini reaction", () => {
+  test("a move that needs a reason, like crying, never plays at random: only as a brain reaction", () => {
     const { frames, minimalFrames, frameSequence, tiredSequence, moveSequences } = getStatusFrames(octopus, everyMove());
     const choices = statusMoveChoices("octopus").map((m) => m.name);
 
@@ -239,7 +239,7 @@ describe("getStatusFrames", () => {
     expect(celebrateSequence.some((i) => minimalFrames[i] === "\\(^^)/")).toBe(true);
   });
 
-  test("each move Gemini can pick has its own sequence, drawn from that move's frames", () => {
+  test("each move the brain can pick has its own sequence, drawn from that move's frames", () => {
     const { frames, moveSequences } = getStatusFrames(octopus);
     const choices = statusMoveChoices("octopus");
 
@@ -255,7 +255,7 @@ describe("getStatusFrames", () => {
     expect(moveSequences!.celebrate.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
   });
 
-  test("every mood Gemini can pick carries hex colors, angry blinking back to the buddy's own", () => {
+  test("every mood the brain can pick carries hex colors, angry blinking back to the buddy's own", () => {
     const { moodColors } = getStatusFrames(octopus);
 
     expect(Object.keys(moodColors!).sort()).toEqual(Object.keys(STATUS_MOODS).sort());

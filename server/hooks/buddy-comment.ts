@@ -18,6 +18,7 @@ import {
 
 interface BuddyConfig {
   commentCooldown?: unknown;
+  brain?: unknown;
 }
 
 interface Events {
@@ -39,7 +40,7 @@ const BUDDY_COMMENT_PATTERN = /<!--\s*buddy:\s*([\s\S]*?)\s*-->/g;
  */
 // "tool" is returned when a buddy_react reaction was adopted rather than
 // written by this hook; it mirrors server/state.ts's ReactionSource.
-export type ReactionSource = "tool" | "comment" | "gemini" | "gemini-error" | "fallback" | "none";
+export type ReactionSource = "tool" | "comment" | "claude" | "claude-error" | "gemini" | "gemini-error" | "fallback" | "none";
 
 export interface BuddyCommentResult {
   comment?: string;
@@ -289,14 +290,15 @@ export function handleBuddyComment(
   if (comment) {
     atomicWriteJson(reactionPath, { reaction: comment, timestamp: now, reason: "turn", source: "comment" });
   } else {
-    // Gemini takes seconds, so it writes the bubble from its own process instead of holding up the turn.
-    spawnDetached("server/gemini-react.ts", [assistantMessage, userMessage, stringField(input, "transcript_path")]);
+    // The brain takes seconds, so it writes the bubble from its own process instead of holding up the turn.
+    spawnDetached("server/brain-react.ts", [assistantMessage, userMessage, stringField(input, "transcript_path")]);
   }
   spawnDetached("server/award-xp.ts", ["turn"]);
   spawnDetached("server/consolidate.ts", [assistantMessage, userMessage]);
   atomicWriteTimestamp(stopMarkerFile, now);
 
-  return comment ? { comment, source: "comment", updated: true } : { source: "gemini", updated: false };
+  const brain = config.brain === "agy" ? "gemini" : "claude";
+  return comment ? { comment, source: "comment", updated: true } : { source: brain, updated: false };
 }
 
 if (import.meta.main) {

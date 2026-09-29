@@ -730,7 +730,7 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, input)).toContain("art-tired");
     });
 
-    test("acts out the move Gemini picked for 30 seconds after its reaction, if the move exists and it animates", () => {
+    test("acts out the move the brain picked for 30 seconds after its reaction, if the move exists and it animates", () => {
       const { configDir, stateDir } = fixture({ moveSequences: { coffee: [3] } });
       // Expired reactions are swept by the real clock, so this test runs on it.
       const clock = Math.floor(Date.now() / 1000);
@@ -1132,7 +1132,7 @@ describe("buddy sub-status cache", () => {
       expect(reacted(1, "furious")).not.toContain(red);
     });
 
-    test("records sweat, context and tiredness for gemini-react, writing only when that changes", () => {
+    test("records sweat, context and tiredness for brain-react, writing only when that changes", () => {
       const { configDir, stateDir } = fixture({});
       const signals = join(stateDir, ".signals.default");
 

@@ -7,7 +7,7 @@ The buddy is decoration. It must never make the machine or Claude Code feel slow
 Before you implement a feature that needs any of the following, stop and ask Sergio. Say what it costs, what cheaper version you considered, and wait for a yes.
 
 - The status line running more often (a lower `refreshInterval` in `buddyStatusLineEntry`, `server/state.ts`) or doing more per tick: a new process start, a network call, a `bun`, `node` or `python` start.
-- A new LLM or network call, or more than one per turn and session. Today the only one is `server/gemini-react.ts`, started detached from the Stop hook.
+- A new LLM or network call, or more than one per turn and session. Today the only one is `server/brain-react.ts`, started detached from the Stop hook.
 - A new process that stays alive: a daemon, a launch agent, an iTerm2 AutoLaunch script, a `setInterval` loop, a file watcher.
 - A new hook event or matcher. Each one starts `bun` on every matching event, and `PostToolUse` fires on every tool call.
 - Reading a whole transcript, walking a directory tree, or reading every session's files on a hot path.
@@ -22,7 +22,7 @@ If you are not sure whether something counts, ask. A short question costs less t
 |------|------|---------------|
 | `statusline/buddy-status.sh` | every refresh tick and every message | open sessions |
 | `hooks/*.sh`, which run `server/hooks/*.ts` | every Bash, Write and Edit call, every prompt, every turn end | open sessions and tool calls |
-| Detached scripts started by hooks (`gemini-react.ts`, `award-xp.ts`, `consolidate.ts`, `shift-mood.ts`, `check-suggestions.ts`) | turn ends and matching tool calls | open sessions and turns |
+| Detached scripts started by hooks (`brain-react.ts`, `award-xp.ts`, `consolidate.ts`, `shift-mood.ts`, `check-suggestions.ts`) | turn ends and matching tool calls | open sessions and turns |
 | MCP server, `server/index.ts` | the whole session | open sessions |
 | `scripts/macos/buddy_focus.py` | while iTerm2 runs | once |
 
@@ -50,13 +50,13 @@ Process starts dominate. Starting `jq`, `awk`, `iconv`, `date` or `bun` costs mo
 
 ## LLM calls
 
-The Gemini reaction in `server/gemini-react.ts` is the most expensive thing the buddy does: an `agy` process, a network round trip and quota. Any other call follows the same pattern.
+The reaction in `server/brain-react.ts` is the most expensive thing the buddy does: a `claude` or `agy` process, a network round trip and quota. Any other call follows the same pattern.
 
 1. It runs detached from the Stop hook, at most once per turn.
-2. It has a hard timeout (`GEMINI_TIMEOUT_MS`) and backs off after a failure (`FAILURE_BACKOFF_MS`), so a broken CLI is not retried every turn.
+2. It has a hard timeout (`BRAIN_TIMEOUT_MS`) and backs off after a failure (`FAILURE_BACKOFF_MS`), so a broken CLI is not retried every turn.
 3. The prompt has a size limit (`EARLIER_CONTEXT_CHARS`, `MESSAGE_CHARS`).
 4. It runs in an empty working directory, so the CLI loads no project.
-5. It deletes what the CLI leaves on disk (`forgetConversation`).
+5. It leaves nothing on disk: `claude` runs with `--no-session-persistence`, and what `agy` stores is deleted (`forgetConversation`).
 
 ## Long-lived processes
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Writes the end-of-turn bubble with Gemini through Antigravity CLI (agy), so the Claude session never spends a call on it.
- * Usage: bun run server/gemini-react.ts <assistantMessage> [userMessage] [transcriptPath]
+ * Writes the end-of-turn bubble from a model call of its own, so the Claude session never spends a turn on it: Claude
+ * through `claude -p` by default, or Gemini through Antigravity CLI (agy) with `"brain": "agy"`.
+ * Usage: bun run server/brain-react.ts <assistantMessage> [userMessage] [transcriptPath]
  */
 
 import { Database } from "bun:sqlite";
@@ -15,13 +16,13 @@ import { buddyStateDir } from "./path.ts";
 import { loadCompanion, loadConfig, saveReaction, sessionId } from "./state.ts";
 
 const FAILURE_BACKOFF_MS = 10 * 60_000;
-const GEMINI_TIMEOUT_MS = 60_000;
+const BRAIN_TIMEOUT_MS = 60_000;
 const TRANSCRIPT_TAIL_BYTES = 512 * 1024;
 const EARLIER_CONTEXT_CHARS = 6000;
 const MESSAGE_CHARS = 1200;
 const MAX_ERROR_CHARS = 90;
 
-export interface GeminiReactRuntime {
+export interface BrainReactRuntime {
   agyDir?: string;
   bin?: string;
   now?: () => number;
@@ -191,7 +192,7 @@ export function parseAnswer(raw: string, moveNames: string[]): { reaction?: stri
   };
 }
 
-type GeminiAnswer = ({ reaction: string; move?: string; mood?: string } | { error: string }) & { conversationId?: string };
+type BrainAnswer = ({ reaction: string; move?: string; mood?: string } | { error: string }) & { conversationId?: string };
 
 function shorten(text: string): string {
   return text.length > MAX_ERROR_CHARS ? `${text.slice(0, MAX_ERROR_CHARS - 1).trimEnd()}…` : text;
@@ -258,15 +259,15 @@ function spentUntil(path: string): number {
 
 function askGemini(
   bin: string, model: string, prompt: string, cwd: string, moveNames: string[], logFile: string, env?: NodeJS.ProcessEnv,
-): GeminiAnswer {
+): BrainAnswer {
   const args = [
     "-p", prompt, "--output-format", "json", "--model", model, "--mode", "plan", "--disable-slash-commands",
     "--log-file", logFile,
   ];
   // Print mode must never sit waiting on a stdin that nobody writes to.
-  const result = spawnSync(bin, args, { cwd, env, encoding: "utf8", input: "", timeout: GEMINI_TIMEOUT_MS });
+  const result = spawnSync(bin, args, { cwd, env, encoding: "utf8", input: "", timeout: BRAIN_TIMEOUT_MS });
   if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return { error: "agy CLI not found" };
-  if (result.signal) return { error: `no answer in ${GEMINI_TIMEOUT_MS / 1000}s` };
+  if (result.signal) return { error: `no answer in ${BRAIN_TIMEOUT_MS / 1000}s` };
   let reply: { response?: unknown; error?: unknown; conversation_id?: unknown } = {};
   try {
     reply = JSON.parse(result.stdout);
@@ -280,6 +281,37 @@ function askGemini(
   if (result.status !== 0) return { error: stderrReason(result.stderr ?? "", result.status), conversationId };
   const { reaction, move, mood } = typeof reply.response === "string" ? parseAnswer(reply.response, moveNames) : {};
   return reaction ? { reaction, move, mood, conversationId } : { error: "empty reply", conversationId };
+}
+
+// The call runs as the user's own Claude Code, so it loads none of their settings: those hold this buddy's Stop
+// hook, which would react to the reaction. Nor their MCP servers, tools, skills, CLAUDE.md or thinking, which
+// would bill the plan for a whole Claude Code turn to write four lines.
+const CLAUDE_ISOLATION = [
+  "--setting-sources", "", "--settings", '{"alwaysThinkingEnabled":false}', "--strict-mcp-config", "--tools", "",
+  "--disable-slash-commands", "--no-session-persistence",
+];
+
+function askClaude(bin: string, model: string, prompt: string, cwd: string, moveNames: string[]): BrainAnswer {
+  const args = [
+    "-p", prompt, "--model", model, "--output-format", "json",
+    "--system-prompt", "You write one reaction for a companion in a developer's terminal, exactly as the prompt asks.",
+    ...CLAUDE_ISOLATION,
+  ];
+  const result = spawnSync(bin, args, { cwd, encoding: "utf8", input: "", timeout: BRAIN_TIMEOUT_MS });
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return { error: "claude CLI not found" };
+  if (result.signal) return { error: `no answer in ${BRAIN_TIMEOUT_MS / 1000}s` };
+  let reply: { result?: unknown; is_error?: unknown } = {};
+  try {
+    reply = JSON.parse(result.stdout);
+  } catch {
+    // Not JSON: the exit code and stderr are all there is.
+  }
+  const text = typeof reply.result === "string" ? reply.result.trim() : "";
+  if (reply.is_error === true || result.status !== 0) {
+    return { error: text ? shorten(firstSentence(text.split("\n")[0] ?? "")) : stderrReason(result.stderr ?? "", result.status) };
+  }
+  const { reaction, move, mood } = parseAnswer(text, moveNames);
+  return reaction ? { reaction, move, mood } : { error: "empty reply" };
 }
 
 /** agy keeps every print-mode run as a conversation; the buddy never resumes one, so each is deleted. */
@@ -306,18 +338,43 @@ function recentFailure(path: string, now: number): string | undefined {
   }
 }
 
-export function reactWithGemini(
+/** Asks the signed-in agy account, or the second one while the first one's quota is spent. */
+function askAgy(runtime: BrainReactRuntime, stateDir: string, now: () => number, prompt: string, cwd: string, moveNames: string[]): BrainAnswer {
+  // agy keeps a ~25 KB log of every run in its own log directory and never deletes it; only the last one is kept here.
+  const logFile = join(stateDir, ".gemini_last.log");
+  const model = loadConfig().geminiModel;
+  const ask = (account: GeminiAccount): BrainAnswer => {
+    rmSync(logFile, { force: true });
+    account.prepare?.();
+    const answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
+    if (answer.conversationId) forgetConversation(answer.conversationId, account.agyDir);
+    return answer;
+  };
+  const signedIn: GeminiAccount = { agyDir: runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli") };
+  const fallback = fallbackAccount(stateDir);
+  const quotaFile = join(stateDir, ".gemini_quota.json");
+  if (fallback && spentUntil(quotaFile) > now()) return ask(fallback);
+  const answer = ask(signedIn);
+  const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
+  if (!resetsIn) return answer;
+  writeFileSync(quotaFile, JSON.stringify({ until: now() + resetsIn }));
+  return fallback ? ask(fallback) : answer;
+}
+
+export function reactWithBrain(
   assistantMessage: string,
   userMessage: string,
-  runtime: GeminiReactRuntime = {},
+  runtime: BrainReactRuntime = {},
 ): string | undefined {
   const companion = loadCompanion();
   if (!companion) return undefined;
   const now = runtime.now ?? Date.now;
   const stateDir = buddyStateDir();
-  const failureFile = join(stateDir, ".gemini_failure.json");
-  // Empty on purpose: agy loads no project context and its read-only tools find nothing.
-  const cwd = join(stateDir, "gemini-cwd");
+  const config = loadConfig();
+  const agy = config.brain === "agy";
+  const failureFile = join(stateDir, agy ? ".gemini_failure.json" : ".claude_failure.json");
+  // Empty on purpose: neither CLI finds project context in it, and agy's read-only tools find nothing.
+  const cwd = join(stateDir, "brain-cwd");
   mkdirSync(cwd, { recursive: true });
 
   let error = recentFailure(failureFile, now());
@@ -327,32 +384,11 @@ export function reactWithGemini(
       : "";
     const prompt = buildPrompt(companion, assistantMessage, userMessage, earlier, lookToTell(stateDir));
     const moveNames = statusMoveChoices(companion.bones.species).map((m) => m.name);
-    // agy keeps a ~25 KB log of every run in its own log directory and never deletes it; only the last one is kept here.
-    const logFile = join(stateDir, ".gemini_last.log");
-    const model = loadConfig().geminiModel;
-    const ask = (account: GeminiAccount): GeminiAnswer => {
-      rmSync(logFile, { force: true });
-      account.prepare?.();
-      const answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
-      if (answer.conversationId) forgetConversation(answer.conversationId, account.agyDir);
-      return answer;
-    };
-    const signedIn: GeminiAccount = { agyDir: runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli") };
-    const fallback = fallbackAccount(stateDir);
-    const quotaFile = join(stateDir, ".gemini_quota.json");
-    let answer: GeminiAnswer;
-    if (fallback && spentUntil(quotaFile) > now()) {
-      answer = ask(fallback);
-    } else {
-      answer = ask(signedIn);
-      const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
-      if (resetsIn) {
-        writeFileSync(quotaFile, JSON.stringify({ until: now() + resetsIn }));
-        if (fallback) answer = ask(fallback);
-      }
-    }
+    const answer = agy
+      ? askAgy(runtime, stateDir, now, prompt, cwd, moveNames)
+      : askClaude(runtime.bin ?? "claude", config.claudeModel, prompt, cwd, moveNames);
     if ("reaction" in answer) {
-      saveReaction(answer.reaction, "turn", "gemini", answer.move, answer.mood);
+      saveReaction(answer.reaction, "turn", agy ? "gemini" : "claude", answer.move, answer.mood);
       return answer.reaction;
     }
     error = answer.error;
@@ -360,13 +396,13 @@ export function reactWithGemini(
   }
 
   const sleeping = `Sleeping, brain not responding. ${error}`;
-  saveReaction(sleeping, "turn", "gemini-error");
+  saveReaction(sleeping, "turn", agy ? "gemini-error" : "claude-error");
   return sleeping;
 }
 
 if (import.meta.main) {
   try {
-    reactWithGemini(process.argv[2] ?? "", process.argv[3] ?? "", { transcriptPath: process.argv[4] || undefined });
+    reactWithBrain(process.argv[2] ?? "", process.argv[3] ?? "", { transcriptPath: process.argv[4] || undefined });
   } catch {
     // Detached from the hook: nobody is waiting for an exit code.
   }

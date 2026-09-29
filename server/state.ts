@@ -300,9 +300,10 @@ function migrateIfNeeded(): void {
  *   tool      — buddy_react MCP tool call (Claude wrote it; renders nowhere)
  *   comment   — old `<!-- buddy: ... -->` HTML comment (legacy / older CC)
  *   fallback  — Stop hook generated it from the canned pool
+ *   claude / gemini — server/brain-react.ts wrote it after the turn; -error when that call failed
  *   none      — unknown / legacy file without a source field
  */
-export type ReactionSource = "tool" | "comment" | "gemini" | "gemini-error" | "fallback" | "none";
+export type ReactionSource = "tool" | "comment" | "claude" | "claude-error" | "gemini" | "gemini-error" | "fallback" | "none";
 
 export interface ReactionState {
   reaction: string;
@@ -395,6 +396,8 @@ export interface BuddyConfig {
   memoryEnabled: boolean;
   suggestionsEnabled: boolean;
   suggestionCooldown: number;
+  brain: "claude" | "agy";
+  claudeModel: string;
   geminiModel: string;
   cannedReactions: boolean;
 }
@@ -424,6 +427,8 @@ const DEFAULT_CONFIG: BuddyConfig = {
   memoryEnabled: true,
   suggestionsEnabled: true,
   suggestionCooldown: 180,
+  brain: "claude",
+  claudeModel: "haiku",
   geminiModel: "gemini-3.8-flash-high",
   cannedReactions: true,
 };
@@ -438,6 +443,10 @@ export function normalizeConfig(data: unknown): BuddyConfig {
   }
   if (!Number.isInteger(config.subStatusRefreshSeconds) || config.subStatusRefreshSeconds <= 0) {
     config.subStatusRefreshSeconds = DEFAULT_CONFIG.subStatusRefreshSeconds;
+  }
+  if (config.brain !== "agy") config.brain = DEFAULT_CONFIG.brain;
+  if (typeof config.claudeModel !== "string" || config.claudeModel.trim() === "") {
+    config.claudeModel = DEFAULT_CONFIG.claudeModel;
   }
   if (typeof config.geminiModel !== "string" || config.geminiModel.trim() === "") {
     config.geminiModel = DEFAULT_CONFIG.geminiModel;

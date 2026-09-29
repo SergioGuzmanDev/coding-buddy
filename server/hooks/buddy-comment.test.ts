@@ -121,7 +121,7 @@ describe("buddy comment Stop hook", () => {
     expect(readFileSync(join(stateDir, "reaction.session1.json"), "utf8")).toBe(originalFile);
   });
 
-  test("hands the bubble to the detached Gemini script when no comment is emitted", () => {
+  test("hands the bubble to the detached brain script when no comment is emitted", () => {
     const stateDir = makeStateDir();
     dirs.push(stateDir);
     writeFileSync(join(stateDir, "status.json"), JSON.stringify({ species: "blob" }));
@@ -143,13 +143,27 @@ describe("buddy comment Stop hook", () => {
       },
     );
 
-    expect(result).toEqual({ source: "gemini", updated: false });
+    expect(result).toEqual({ source: "claude", updated: false });
     expect(spawned[0]).toEqual({
-      script: "server/gemini-react.ts",
+      script: "server/brain-react.ts",
       args: ["a perfectly ordinary reply with no comment", "go", "/tmp/session.jsonl"],
     });
     expect(existsSync(join(stateDir, "reaction.session1.json"))).toBe(false);
     expect(JSON.parse(readFileSync(join(stateDir, "events.json"), "utf8")).turns).toBe(1);
+  });
+
+  test("reports Gemini as the bubble's source when the brain is agy", () => {
+    const stateDir = makeStateDir();
+    dirs.push(stateDir);
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ species: "blob" }));
+    writeFileSync(join(stateDir, "config.json"), JSON.stringify({ brain: "agy" }));
+
+    const result = handleBuddyComment(
+      JSON.stringify({ last_assistant_message: "no comment", last_user_message: "go" }),
+      { now: () => 1_700_000_000_000, random: () => 0, sessionId: "session1", spawnDetached: () => {}, stateDir },
+    );
+
+    expect(result).toEqual({ source: "gemini", updated: false });
   });
 
   // F1: a tool reaction from a LONG turn (>5min) survives the stop hook.
@@ -189,7 +203,7 @@ describe("buddy comment Stop hook", () => {
   });
 
   // F2: a future-dated tool timestamp is treated as untrusted (clock-skewed
-  // garbage) and Gemini is asked for a new line.
+  // garbage) and the brain is asked for a new line.
   test("F2 future-clock: 5-min future tool timestamp is not adopted", () => {
     const stateDir = makeStateDir();
     dirs.push(stateDir);
@@ -220,7 +234,7 @@ describe("buddy comment Stop hook", () => {
       },
     );
 
-    expect(result).toEqual({ source: "gemini", updated: false });
+    expect(result).toEqual({ source: "claude", updated: false });
   });
 
   // F5: 10 short turns inside a 30s cooldown window produce ONE

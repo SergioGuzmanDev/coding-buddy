@@ -232,6 +232,10 @@ function describeReactionSource(
       return "real model-authored reaction (buddy_react MCP tool)";
     case "comment":
       return "real model-authored reaction (legacy HTML comment, Stop hook)";
+    case "claude":
+      return "Claude-authored reaction (Stop hook, claude -p)";
+    case "claude-error":
+      return "Claude did not answer; the bubble shows why";
     case "gemini":
       return "Gemini-authored reaction (Stop hook, agy CLI)";
     case "gemini-error":
@@ -432,7 +436,7 @@ server.tool(
       "  /buddy statusline Enable or disable buddy in the status line",
       "  /buddy theme     Set color theme: dark (bright) or light (dark colors)",
       "  /buddy color     Show or set the status line color (#RRGGBB, or reset for the rarity color)",
-      "  /buddy model     Show or set the agy model for reactions (e.g. gemini-3.8-flash-high, or reset)",
+      "  /buddy model     Show or set the model that writes reactions (e.g. haiku, or reset)",
       "",
       "CLI:",
       "  bun run help            Show full CLI help",
@@ -588,15 +592,16 @@ server.tool(
 
 server.tool(
   "buddy_model",
-  "Set the agy model that writes end-of-turn reactions, e.g. gemini-3.8-flash-high, -medium or -low (the list comes from `agy models`), or reset.",
-  { model: z.string().min(1).optional().describe("agy model slug, or reset") },
+  "Set the model that writes end-of-turn reactions: a Claude model such as haiku or sonnet, or with brain agy a Gemini slug such as gemini-3.8-flash-high (listed by `agy models`), or reset.",
+  { model: z.string().min(1).optional().describe("model name, or reset") },
   async ({ model }) => {
     const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
+    const key = loadConfig().brain === "agy" ? "geminiModel" : "claudeModel";
     if (model === undefined) {
-      return text(`Model: ${loadConfig().geminiModel}\nUse /buddy model <slug|reset> to change; \`agy models\` lists the slugs.`);
+      return text(`Model: ${loadConfig()[key]}\nUse /buddy model <name|reset> to change it.`);
     }
-    saveConfig({ geminiModel: model === "reset" ? undefined : model.trim() });
-    return text(`Reactions now use ${loadConfig().geminiModel}.`);
+    saveConfig({ [key]: model === "reset" ? undefined : model.trim() });
+    return text(`Reactions now use ${loadConfig()[key]}.`);
   },
 );
 

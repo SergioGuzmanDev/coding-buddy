@@ -8,7 +8,7 @@
  */
 
 import { searchBuddy, renderBuddy, SPECIES, RARITIES, STAT_NAMES,
-type Species, type Rarity, type StatName, type SearchCriteria, } from "../core/engine.ts"
+type Species, type Rarity, type StatName, type SearchCriteria, type SearchResult, } from "../core/engine.ts"
 import {
   saveCompanionSlot, saveActiveSlot, writeStatusState,
   slugify, unusedName, listCompanionSlots,
@@ -42,15 +42,62 @@ function pickFromList<T extends string>(label: string, items: readonly T[]): Pro
   });
 }
 
+function adopt(chosen: SearchResult, chosenName: string) {
+  const slot = slugify(chosenName);
+  const companion = {
+    bones: chosen.bones,
+    name: chosenName,
+    personality: `A ${chosen.bones.rarity} ${chosen.bones.species} who watches code with quiet intensity.`,
+    hatchedAt: Date.now(),
+    userId: chosen.userId,
+  };
+
+  saveCompanionSlot(companion, slot);
+  saveActiveSlot(slot);
+  writeStatusState(companion, `*${chosenName} arrives*`);
+
+  console.log(`${GREEN}✓${NC}  ${chosenName} saved to slot "${slot}" and set as active.`);
+  console.log(`\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}`);
+  console.log(`${GREEN}  Done! Restart Claude Code to see your new buddy.${NC}`);
+  console.log(`${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n`);
+}
+
+function flag(name: string): string | undefined {
+  const at = process.argv.indexOf(`--${name}`);
+  return at >= 0 ? process.argv[at + 1] : undefined;
+}
+
+// `--species <name> [--name <name>]` asks nothing, so an installing agent can give someone the species they chose.
+function huntWithoutQuestions(species: string) {
+  rl.close();
+  if (!(SPECIES as readonly string[]).includes(species)) {
+    console.error(`${RED}✗${NC}  Unknown species "${species}". One of: ${SPECIES.join(", ")}`);
+    process.exit(1);
+  }
+  const name = flag("name")?.trim() || unusedName();
+  if (listCompanionSlots().some((e) => slugify(e.companion.name) === slugify(name))) {
+    console.error(`${RED}✗${NC}  A buddy named "${name}" already exists. Pass another --name.`);
+    process.exit(1);
+  }
+  const [found] = searchBuddy({ species: species as Species, rarity: "common", wantShiny: false }, 10_000_000);
+  if (!found) {
+    console.error(`${RED}✗${NC}  No ${species} found. Run it again.`);
+    process.exit(1);
+  }
+  adopt(found, name);
+}
+
 async function main() {
+  const species = flag("species");
+  if (species !== undefined) return huntWithoutQuestions(species);
   console.log(`
 ${CYAN}╔══════════════════════════════════════════════════════════╗${NC}
 ${CYAN}║${NC}  ${BOLD}coding-buddy hunt${NC} — find your perfect companion          ${CYAN}║${NC}
 ${CYAN}╚══════════════════════════════════════════════════════════╝${NC}
 `);
 
-  const species = await pickFromList("Species:", SPECIES);
-  console.log(`${GREEN}✓${NC} ${species}`);
+  const picked = await pickFromList("Species:", SPECIES);
+  console.log(`${GREEN}✓${NC} ${picked}`);
 
   const rarity = await pickFromList("Rarity:", RARITIES);
   console.log(`${GREEN}✓${NC} ${rarity}`);
@@ -82,7 +129,7 @@ ${CYAN}╚═══════════════════════�
 
   console.log(`\n${CYAN}→${NC}  Searching...\n`);
 
-  const criteria: SearchCriteria = { species, rarity, wantShiny };
+  const criteria: SearchCriteria = { species: picked, rarity, wantShiny };
   if (wantPeak) criteria.wantPeak = wantPeak;
   if (wantDump) criteria.wantDump = wantDump;
 
@@ -141,24 +188,7 @@ ${CYAN}╚═══════════════════════�
     }
   }
 
-  const slot = slugify(chosenName);
-  const companion = {
-    bones: chosen.bones,
-    name: chosenName,
-    personality: `A ${chosen.bones.rarity} ${chosen.bones.species} who watches code with quiet intensity.`,
-    hatchedAt: Date.now(),
-    userId: chosen.userId,
-  };
-
-  saveCompanionSlot(companion, slot);
-  saveActiveSlot(slot);
-  writeStatusState(companion, `*${chosenName} arrives*`);
-
-  console.log(`${GREEN}✓${NC}  ${chosenName} saved to slot "${slot}" and set as active.`);
-  console.log(`\n${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}`);
-  console.log(`${GREEN}  Done! Restart Claude Code to see your new buddy.${NC}`);
-  console.log(`${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n`);
-
+  adopt(chosen, chosenName);
   rl.close();
 }
 

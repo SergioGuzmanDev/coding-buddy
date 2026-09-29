@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { join } from "path";
 import { tmpdir } from "os";
 import type { Companion } from "../core/engine.ts";
-import { reactWithGemini } from "./gemini-react.ts";
+import { reactWithBrain } from "./brain-react.ts";
 import { saveCompanion } from "./state.ts";
 
 const companion: Companion = {
@@ -28,8 +28,8 @@ let root: string;
 let stateDir: string;
 const savedEnv = { ...process.env };
 
-function fakeGemini(body: string): string {
-  const bin = join(root, "fake-gemini");
+function fakeCli(body: string): string {
+  const bin = join(root, "fake-cli");
   writeFileSync(
     bin,
     `#!/bin/sh\necho call >> "${root}/calls.log"\nprintf '%s\\n' "$@" > "${root}/args.log"\n${body}\n`,
@@ -62,13 +62,13 @@ function bubble(): { reaction: string; reason: string; source: string } {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "coding-buddy-gemini-"));
+  root = mkdtempSync(join(tmpdir(), "coding-buddy-brain-"));
   process.env.CLAUDE_CONFIG_DIR = root;
   process.env.CLAUDE_CODE_SESSION_ID = "sessionABCDEF";
   delete process.env.CODING_BUDDY_USER_ID;
   stateDir = join(root, "buddy-state");
   mkdirSync(stateDir, { recursive: true });
-  writeFileSync(join(stateDir, "config.json"), JSON.stringify({ geminiModel: "gemini-test" }));
+  writeFileSync(join(stateDir, "config.json"), JSON.stringify({ brain: "agy", geminiModel: "gemini-test" }));
   saveCompanion(companion);
 });
 
@@ -77,15 +77,15 @@ afterEach(() => {
   rmSync(root, { force: true, recursive: true });
 });
 
-describe("gemini-react", () => {
+describe("brain-react with brain agy", () => {
   test("writes Gemini's first line as the turn bubble, asked read-only with the configured model", () => {
     writeFileSync(
       join(root, "out.json"),
       JSON.stringify({ response: '"*quacks* you dropped the null check"\nsecond line' }),
     );
-    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const bin = fakeCli(`cat "${root}/out.json"`);
 
-    const reaction = reactWithGemini("I removed the null check in parse()", "clean this up", { bin });
+    const reaction = reactWithBrain("I removed the null check in parse()", "clean this up", { bin });
 
     expect(reaction).toBe("*quacks* you dropped the null check");
     expect(bubble()).toMatchObject({ reaction, reason: "turn", source: "gemini" });
@@ -97,25 +97,25 @@ describe("gemini-react", () => {
   });
 
   test("says it is sleeping with Gemini's error and stops calling Gemini for ten minutes", () => {
-    const bin = fakeGemini(
+    const bin = fakeCli(
       "echo 'stack trace noise' >&2; printf '\\033[31mManual authorization is required but the session is non-interactive. Please log in.\\033[0m\\n' >&2; exit 41",
     );
     const start = 1_700_000_000_000;
     const sleeping = "Sleeping, brain not responding. Manual authorization is required but the session is non-interactive.";
 
-    expect(reactWithGemini("reply", "ask", { bin, now: () => start })).toBe(sleeping);
+    expect(reactWithBrain("reply", "ask", { bin, now: () => start })).toBe(sleeping);
     expect(bubble()).toMatchObject({ reaction: sleeping, source: "gemini-error" });
-    reactWithGemini("reply", "ask", { bin, now: () => start + 9 * 60_000 });
+    reactWithBrain("reply", "ask", { bin, now: () => start + 9 * 60_000 });
     expect(bubble().reaction).toBe(sleeping);
     expect(callCount()).toBe(1);
 
-    reactWithGemini("reply", "ask", { bin, now: () => start + 11 * 60_000 });
+    reactWithBrain("reply", "ask", { bin, now: () => start + 11 * 60_000 });
     expect(callCount()).toBe(2);
   });
 
   test("gives Gemini the earlier spoken turns, without tool output, injected text or the latest exchange twice", () => {
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
-    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const bin = fakeCli(`cat "${root}/out.json"`);
     const transcript = join(root, "session.jsonl");
     const entries = [
       { type: "user", message: { content: "EARLY-QUESTION about the parser" } },
@@ -126,7 +126,7 @@ describe("gemini-react", () => {
     ];
     writeFileSync(transcript, `cut-off line\n${entries.map((e) => JSON.stringify(e)).join("\n")}\n`);
 
-    reactWithGemini("LATEST-REPLY", "LATEST-ASK", { bin, transcriptPath: transcript });
+    reactWithBrain("LATEST-REPLY", "LATEST-ASK", { bin, transcriptPath: transcript });
 
     const prompt = readFileSync(join(root, "args.log"), "utf8");
     expect(prompt).toContain("Developer: EARLY-QUESTION about the parser");
@@ -139,7 +139,7 @@ describe("gemini-react", () => {
     saveCompanion({ ...companion, bones: { ...companion.bones, species: "octopus" } });
     const answer = (response: string) => {
       writeFileSync(join(root, "out.json"), JSON.stringify({ response }));
-      reactWithGemini("reply", "ask", { bin: fakeGemini(`cat "${root}/out.json"`) });
+      reactWithBrain("reply", "ask", { bin: fakeCli(`cat "${root}/out.json"`) });
       return JSON.parse(readFileSync(join(stateDir, "reaction.sessionA.json"), "utf8"));
     };
 
@@ -160,7 +160,7 @@ describe("gemini-react", () => {
     const second = "y el refresh a dos segundos se respeta.";
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: `coffee happy\n${first}\n${second}` }));
 
-    reactWithGemini("reply", "ask", { bin: fakeGemini(`cat "${root}/out.json"`) });
+    reactWithBrain("reply", "ask", { bin: fakeCli(`cat "${root}/out.json"`) });
 
     expect(bubble().reaction).toBe(`${first} ${second}`);
     expect(readFileSync(join(root, "args.log"), "utf8")).toContain("3 or 4 short lines, about 40 characters each");
@@ -168,10 +168,10 @@ describe("gemini-react", () => {
 
   test("tells Gemini the buddy is sweating or tired when the status line draws it that way", () => {
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
-    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const bin = fakeCli(`cat "${root}/out.json"`);
     const prompt = (signals: string) => {
       writeFileSync(join(stateDir, ".signals.sessionA"), signals);
-      reactWithGemini("reply", "ask", { bin });
+      reactWithBrain("reply", "ask", { bin });
       return readFileSync(join(root, "args.log"), "utf8");
     };
 
@@ -182,10 +182,10 @@ describe("gemini-react", () => {
 
   test("worries about the context window only a little until it is half full", () => {
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
-    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const bin = fakeCli(`cat "${root}/out.json"`);
     const prompt = (context: number) => {
       writeFileSync(join(stateDir, ".signals.sessionA"), `sweat=true context=${context} tired=false\n`);
-      reactWithGemini("reply", "ask", { bin });
+      reactWithBrain("reply", "ask", { bin });
       return readFileSync(join(root, "args.log"), "utf8");
     };
 
@@ -200,10 +200,10 @@ describe("gemini-react", () => {
 
   test("brings up the context once per worry level it rises to, not on every reaction", () => {
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
-    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const bin = fakeCli(`cat "${root}/out.json"`);
     const prompt = (signals: string) => {
       writeFileSync(join(stateDir, ".signals.sessionA"), signals);
-      reactWithGemini("reply", "ask", { bin });
+      reactWithBrain("reply", "ask", { bin });
       return readFileSync(join(root, "args.log"), "utf8");
     };
 
@@ -220,9 +220,9 @@ describe("gemini-react", () => {
     mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
     writeFileSync(join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "{}");
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks* from the second account" }));
-    const bin = fakeGemini(spentFirstAccount(home));
+    const bin = fakeCli(spentFirstAccount(home));
     let clock = 1_000_000;
-    const react = () => reactWithGemini("reply", "ask", { bin, now: () => clock });
+    const react = () => reactWithBrain("reply", "ask", { bin, now: () => clock });
 
     react();
     expect(bubble().reaction).toBe("*quacks* from the second account");
@@ -247,14 +247,14 @@ describe("gemini-react", () => {
     writeFileSync(security, `#!/bin/sh\necho "$HOME $*" >> "${root}/security.log"\n[ "$1" = create-keychain ] && touch "$4"\nexit 0\n`);
     chmodSync(security, 0o755);
     process.env.PATH = `${join(root, "bin")}:${process.env.PATH}`;
-    const bin = fakeGemini(spentFirstAccount(home));
+    const bin = fakeCli(spentFirstAccount(home));
     const keychain = join(home, "Library", "Keychains", "login.keychain-db");
     const securityCalls = () => readFileSync(join(root, "security.log"), "utf8").trim().split("\n");
 
-    reactWithGemini("reply", "ask", { bin });
+    reactWithBrain("reply", "ask", { bin });
     expect(securityCalls()).toEqual([`${home} create-keychain -p  ${keychain}`, `${home} unlock-keychain -p  ${keychain}`]);
 
-    reactWithGemini("reply", "ask", { bin });
+    reactWithBrain("reply", "ask", { bin });
     expect(securityCalls().slice(2)).toEqual([`${home} unlock-keychain -p  ${keychain}`]);
   });
 
@@ -262,14 +262,14 @@ describe("gemini-react", () => {
     const home = join(stateDir, "gemini-fallback-home");
     mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
 
-    reactWithGemini("reply", "ask", { bin: fakeGemini(spentFirstAccount(home)) });
+    reactWithBrain("reply", "ask", { bin: fakeCli(spentFirstAccount(home)) });
 
     expect(callCount()).toBe(1);
     expect(bubble().reaction).toContain("RESOURCE_EXHAUSTED");
   });
 
   test("says it is sleeping when the agy CLI is missing", () => {
-    reactWithGemini("reply", "ask", { bin: join(root, "no-such-agy") });
+    reactWithBrain("reply", "ask", { bin: join(root, "no-such-agy") });
 
     expect(bubble().reaction).toBe("Sleeping, brain not responding. agy CLI not found");
   });
@@ -279,9 +279,9 @@ describe("gemini-react", () => {
       status: "ERROR",
       error: "invalid model selection: model flash is not recognized\nAvailable models:\n  Gemini 3.8 Flash (High)",
     }));
-    const bin = fakeGemini(`cat "${root}/out.json"; exit 1`);
+    const bin = fakeCli(`cat "${root}/out.json"; exit 1`);
 
-    reactWithGemini("reply", "ask", { bin });
+    reactWithBrain("reply", "ask", { bin });
 
     expect(bubble().reaction).toBe("Sleeping, brain not responding. invalid model selection: model flash is not recognized");
   });
@@ -291,7 +291,7 @@ describe("gemini-react", () => {
     writeFileSync(logFile, "PREVIOUS-RUN");
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
 
-    reactWithGemini("reply", "ask", { bin: fakeGemini(`cat "${root}/out.json"`) });
+    reactWithBrain("reply", "ask", { bin: fakeCli(`cat "${root}/out.json"`) });
 
     expect(readFileSync(join(root, "args.log"), "utf8")).toContain(`--log-file\n${logFile}\n`);
     expect(existsSync(logFile)).toBe(false);
@@ -309,9 +309,9 @@ describe("gemini-react", () => {
     index.run("INSERT INTO conversation_summaries VALUES (?), (?)", [id, mine]);
     index.close();
     writeFileSync(join(root, "out.json"), JSON.stringify({ status: "SUCCESS", response: "*quacks*", conversation_id: id }));
-    const bin = fakeGemini(`cat "${root}/out.json"`);
+    const bin = fakeCli(`cat "${root}/out.json"`);
 
-    reactWithGemini("reply", "ask", { bin, agyDir });
+    reactWithBrain("reply", "ask", { bin, agyDir });
 
     expect(readdirSync(join(agyDir, "conversations"))).toEqual([`${mine}.db`]);
     expect(existsSync(join(agyDir, "brain", id))).toBe(false);
@@ -326,8 +326,57 @@ describe("gemini-react", () => {
     writeFileSync(join(root, "victim.db"), "keep me");
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*", conversation_id: "../../victim" }));
 
-    reactWithGemini("reply", "ask", { bin: fakeGemini(`cat "${root}/out.json"`), agyDir });
+    reactWithBrain("reply", "ask", { bin: fakeCli(`cat "${root}/out.json"`), agyDir });
 
     expect(existsSync(join(root, "victim.db"))).toBe(true);
+  });
+});
+
+describe("brain-react with the default brain", () => {
+  beforeEach(() => writeFileSync(join(stateDir, "config.json"), JSON.stringify({})));
+
+  test("asks Claude with haiku, loading none of the user's settings, hooks, tools, MCP servers or thinking", () => {
+    writeFileSync(join(root, "out.json"), JSON.stringify({ result: "*quacks* you dropped the null check", is_error: false }));
+
+    const reaction = reactWithBrain("I removed the null check in parse()", "clean this up", { bin: fakeCli(`cat "${root}/out.json"`) });
+
+    expect(reaction).toBe("*quacks* you dropped the null check");
+    expect(bubble()).toMatchObject({ reaction, reason: "turn", source: "claude" });
+    const args = readFileSync(join(root, "args.log"), "utf8");
+    expect(args).toStartWith("-p\n");
+    expect(args).toContain("I removed the null check in parse()");
+    expect(args).toContain("--model\nhaiku\n");
+    expect(args).toContain("--setting-sources\n\n");
+    expect(args).toContain('--settings\n{"alwaysThinkingEnabled":false}\n');
+    expect(args).toContain("--strict-mcp-config\n");
+    expect(args).toContain("--tools\n\n");
+    expect(args).toContain("--disable-slash-commands\n");
+    expect(args).toContain("--no-session-persistence\n");
+  });
+
+  test("uses the configured Claude model", () => {
+    writeFileSync(join(stateDir, "config.json"), JSON.stringify({ claudeModel: "sonnet" }));
+    writeFileSync(join(root, "out.json"), JSON.stringify({ result: "*quacks*", is_error: false }));
+
+    reactWithBrain("reply", "ask", { bin: fakeCli(`cat "${root}/out.json"`) });
+
+    expect(readFileSync(join(root, "args.log"), "utf8")).toContain("--model\nsonnet\n");
+  });
+
+  test("says it is sleeping with Claude's error and stops calling it for ten minutes", () => {
+    const bin = fakeCli(`echo '{"result":"Not logged in. Please run /login","is_error":true}'; exit 1`);
+    const start = 1_700_000_000_000;
+    const sleeping = "Sleeping, brain not responding. Not logged in.";
+
+    expect(reactWithBrain("reply", "ask", { bin, now: () => start })).toBe(sleeping);
+    expect(bubble()).toMatchObject({ reaction: sleeping, source: "claude-error" });
+    reactWithBrain("reply", "ask", { bin, now: () => start + 9 * 60_000 });
+    expect(callCount()).toBe(1);
+  });
+
+  test("says it is sleeping when the claude CLI is missing", () => {
+    reactWithBrain("reply", "ask", { bin: join(root, "no-such-claude") });
+
+    expect(bubble()).toMatchObject({ reaction: "Sleeping, brain not responding. claude CLI not found", source: "claude-error" });
   });
 });

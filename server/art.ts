@@ -264,7 +264,7 @@ export const STATUS_FRAME_SEQUENCE: readonly number[] = [
 // Offsets into a smoke action's frames: a drag, the smoke, a second drag.
 const SMOKE_SEQUENCE = [0, 0, 1, 1, 2, 3, 3, 0, 1, 1, 2, 3, 3, 0];
 
-// name and does are what Gemini picks from to act out its reaction; see server/gemini-react.ts.
+// name and does are what the brain picks from to act out its reaction; see server/brain-react.ts.
 type StatusMove = { name: string; does: string; frames: string[][]; faces: string[]; sequence: number[]; tiredWeight?: number };
 
 const OCTOPUS_SLEEP: StatusMove = {
@@ -281,7 +281,7 @@ const OCTOPUS_SLEEP: StatusMove = {
 };
 
 // Octopus-only moves. One pool move is drawn at random every 30 seconds; a tired session draws from the
-// same pool by tiredWeight. A cued move needs a reason to happen, so only a Gemini reaction plays it. The top row stays blank and every row keeps the resting width, so the panel
+// same pool by tiredWeight. A cued move needs a reason to happen, so only a brain reaction plays it. The top row stays blank and every row keeps the resting width, so the panel
 // never changes size mid-move, and each pose lasts two ticks so a status line refreshed every 2s still
 // shows it. In the one-row faces the extras sit around the face; the name stays pinned to the right.
 export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: StatusMove; cued: StatusMove[] }>> = {
@@ -811,7 +811,7 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
   },
 };
 
-// Gemini picks one with each reaction, and the status line paints the buddy with it while the reaction's
+// The brain picks one with each reaction, and the status line paints the buddy with it while the reaction's
 // move plays. Colors take turns every two ticks; "" is the buddy's own color, so angry blinks.
 export const STATUS_MOODS: Record<string, { feels: string; colors: string[] }> = {
   angry: { feels: "angry", colors: ["#FF5555", ""] },
@@ -821,7 +821,7 @@ export const STATUS_MOODS: Record<string, { feels: string; colors: string[] }> =
   sad: { feels: "down", colors: ["#5FAFFF"] },
 };
 
-/** The moves Gemini may act out with a reaction: the pool and the cued moves. */
+/** The moves the brain may act out with a reaction: the pool and the cued moves. */
 export function statusMoveChoices(species: Species): StatusMove[] {
   const moves = STATUS_MOVES[species];
   return moves ? [...moves.pool, ...moves.cued] : [];
