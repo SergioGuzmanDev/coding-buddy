@@ -916,7 +916,7 @@ describe("buddy sub-status cache", () => {
         expect(closed).toMatch(reopenLink);
       });
 
-      test("a move the loop schedules plays over a replayed reaction, never over its first play", () => {
+      test("a reopened reaction cuts the move the loop is playing at the click, as its first play holds the loop off", () => {
         const { reaction, focus, gate, react, tick, touch, reopen } = setup(
           { clickToExpand: true },
           { frameSequence: [2], moveSequences: { coffee: [3, 1], stretch: [2] } },
@@ -931,8 +931,25 @@ describe("buddy sub-status cache", () => {
         const now = Number(readFileSync(gate, "utf8").split("\n")[1]) - clock;
         const replay = tick(now);
         expect(replay).toContain("*sorbe*");
-        expect(replay).toContain("art-asleep");
+        expect(replay).toContain("art-cheer");
         expect(replay).toContain(red);
+        expect(tick(now + 1)).toContain("art-tired");
+      });
+
+      test("a move the loop starts after the click plays over the replayed reaction", () => {
+        const { gate, react, tick } = setup(
+          { clickToExpand: true },
+          { frameSequence: [2, 2, 0, 2], moveSequences: { coffee: [3, 1], stretch: [2] } },
+        );
+        react(100);
+        const click = clock + 40 - ((clock + 40) % 4) + 1;
+        writeFileSync(gate, `${(clock - 100) * 1000}\n${click}\nreplay\n`);
+
+        expect(tick(click - clock)).toContain("art-cheer");
+        expect(tick(click - clock + 1)).toContain("art-tired");
+        expect(tick(click - clock + 2)).toContain("art-asleep");
+        expect(tick(click - clock + 4)).toContain("art-asleep");
+        expect(tick(click - clock + 5)).toContain("art-tired");
       });
 
       test("a new reaction during a replay plays its own move once focused for 3 seconds", () => {

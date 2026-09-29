@@ -539,20 +539,25 @@ fi
 # The drop comes and goes while sweating. A frozen status line has no clock to blink by, so it keeps it.
 SWEAT_DRAWN=false
 [ "$SWEAT" = true ] && [ $(( (ANIMATE ? NOW : 0) % SWEAT_EVERY_SECONDS )) -lt "$SWEAT_SHOWN_SECONDS" ] && SWEAT_DRAWN=true
-# A reopened bubble replays its move only between the moves the loop has scheduled; a first play holds them off.
+# A reopened bubble cuts the move the loop is playing at the click, but yields to any move the loop starts
+# after it; a first play holds them all off. The loop rests between moves, so a rest since the click marks a new one.
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
     --argjson sweat "$SWEAT_DRAWN" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
     --argjson since_reaction "$SINCE_REACTION" --argjson replay "$REPLAY" '
-    def at($sequence): $sequence[$now % ($sequence | length)];
+    def at($sequence; $t): $sequence[$t % ($sequence | length)];
+    [.moveSequences[]?[]] as $move_frames
+    | def moving: IN($move_frames[]);
     (if $sweat then (.sweat // {}) else {} end) as $sweat_set
     | (if $tier == "compact" then ($sweat_set.compactFrames // .compactFrames? // .frames)
      elif $tier == "minimal" then ($sweat_set.minimalFrames // .minimalFrames? // .frames)
      else ($sweat_set.frames // .frames) end) as $set
-    | (if $move == "idle" and (.idleSequence | length) > 0 then at(.idleSequence)
-       elif $move == "tired" and (.tiredSequence | length) > 0 then at(.tiredSequence)
-       else at(.frameSequence) end) as $scheduled
-    | (if $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0
-          and (($replay and ([.moveSequences[][]] | index($scheduled))) | not)
+    | (if $move == "idle" and (.idleSequence | length) > 0 then .idleSequence
+       elif $move == "tired" and (.tiredSequence | length) > 0 then .tiredSequence
+       else .frameSequence end) as $loop
+    | at($loop; $now) as $scheduled
+    | ($replay and ($scheduled | moving)
+       and any(range($now - $since_reaction; $now) | at($loop; .); moving | not)) as $loop_cuts_replay
+    | (if $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0 and ($loop_cuts_replay | not)
            then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
        else $scheduled end) as $idx
     | ((.moodColors[$reaction_mood] // []) as $mood
