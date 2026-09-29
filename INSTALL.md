@@ -10,6 +10,9 @@ This is Sergio's fork of [ramarivera/coding-buddy](https://github.com/ramarivera
 - On macOS with iTerm2: the bubble waits until you look at the tab, closes after 15 seconds, and cmd+click on
   the buddy's name reopens it.
 
+It runs on macOS and Linux. On Windows it needs Git for Windows, whose Git Bash runs its scripts, as the original
+project does; that project calls Windows support experimental, and nobody has tried this fork there yet.
+
 ## Install
 
 Open Claude Code and paste this:
@@ -29,13 +32,26 @@ Your shell goes back to its starting folder after every command, so each command
 If you install `bun` in step 1, this shell does not have it on `PATH` yet: start every later command with
 `export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH";`.
 
+On Windows the buddy needs Git for Windows. Its status line and hooks are bash scripts, and without Git Bash Claude
+Code runs them in PowerShell, where they fail. With Git Bash, Claude Code runs your commands there too, and the
+commands below work as written unless a step gives a Windows variant. If your commands run in PowerShell, Git for
+Windows is missing: install it with `winget install Git.Git`, then ask the user to restart Claude Code and ask for
+the install again. If Claude Code does not find Git Bash afterwards, set `CLAUDE_CODE_GIT_BASH_PATH` under `env` in
+`~/.claude/settings.json` to its `bash.exe`, usually `C:\Program Files\Git\bin\bash.exe`.
+
 ### 1. Prepare the machine
 
-1. `git`: if it is missing on macOS, ask the user to run `xcode-select --install` and wait for it to finish.
-2. `bun`: if it is missing, run `curl -fsSL https://bun.sh/install | bash`.
-3. `jq`: if it is missing on macOS, run `brew install jq`. Without Homebrew, ask the user how they install packages.
-4. `claude`: check `zsh -lic 'command -v claude'`. If it prints nothing, the Claude brain cannot start from the
-   buddy's hooks. Tell the user in step 2, and recommend agy.
+1. `git`: if it is missing on macOS, ask the user to run `xcode-select --install` and wait for it to finish. On
+   Windows it comes with Git for Windows, above.
+2. `bun`: if it is missing, run `curl -fsSL https://bun.sh/install | bash`. On Windows, run
+   `powershell -c "irm bun.sh/install.ps1 | iex"` instead.
+3. `jq`: if it is missing, run `brew install jq` on macOS, `winget install jqlang.jq` on Windows, or the
+   distribution's package manager on Linux. Without any of them, ask the user how they install packages.
+4. `claude`: check `sh -c 'command -v claude'`, which sees the `PATH` the buddy's hooks get and no shell functions.
+   If it prints nothing, the Claude brain cannot start from the buddy's hooks. Tell the user in step 2, and recommend
+   agy. On Windows, also check `where.exe claude`: the buddy starts `claude` without a shell, which finds
+   `claude.exe` but may not start an npm `claude.cmd`. With only `claude.cmd`, suggest Claude Code's native
+   installer, or agy.
 5. Run `claude plugin list`. If it lists `coding-buddy`, tell the user it would give them two buddies, and run
    `claude plugin uninstall coding-buddy@coding-buddy` once they agree.
 
@@ -95,8 +111,11 @@ If the user chose the octopus, run `cd ~/coding-buddy && bun run hunt --species 
 
 For Claude there is nothing to do. For agy:
 
-1. Run `curl -fsSL https://antigravity.google/cli/install.sh | bash`. It installs `agy` in `~/.local/bin`.
-2. Check `zsh -lic 'command -v agy'`. If it prints nothing, add `export PATH="$HOME/.local/bin:$PATH"` to `~/.zshrc`.
+1. Run `curl -fsSL https://antigravity.google/cli/install.sh | bash`. It installs `agy` in `~/.local/bin`. That script
+   is for macOS and Linux: on Windows, follow Google's Antigravity CLI instructions for Windows instead.
+2. Check `sh -c 'command -v agy'`. If it prints nothing, add `export PATH="$HOME/.local/bin:$PATH"` to the shell's
+   startup file (`~/.zshrc` or `~/.bashrc`), and tell the user the buddy finds agy only in Claude Code sessions
+   started after that. On Windows, check `where.exe agy` and add its folder to the user's `PATH` instead.
 3. Ask the user to run `agy` in another terminal tab, sign in with their **company** Google account in the browser
    that opens, and quit it. You cannot do this sign-in for them.
 4. Check it: `agy -p "Say ok" --output-format json --model gemini-3.8-flash-high </dev/null` must print JSON with a
@@ -105,7 +124,7 @@ For Claude there is nothing to do. For agy:
 
 ### 6. iTerm2 extras
 
-Only if the user wants them:
+Only on macOS, and only if the user wants them:
 
 1. Turn on iTerm2's Python API: `defaults write com.googlecode.iterm2 EnableAPIServer -bool true`.
 2. Install the focus tracker:
