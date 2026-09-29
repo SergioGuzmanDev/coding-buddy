@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { loadConfig, saveColor } from "./state.ts";
+import { loadConfig, saveColor, saveConfig, saveUnsetConfig } from "./state.ts";
 
 let root: string;
 const savedEnv = { ...process.env };
@@ -30,4 +30,13 @@ test("saveColor stores #RRGGBB, adds a missing #, rejects anything else and rese
 
 test("reactions default to the best agy Flash model", () => {
   expect(loadConfig().geminiModel).toBe("gemini-3.8-flash-high");
+});
+
+test("saveUnsetConfig saves only the settings the config file does not have yet", () => {
+  expect(saveUnsetConfig({ slim: "bubble", expanded: true })).toEqual(["slim", "expanded"]);
+  expect(loadConfig()).toMatchObject({ slim: "bubble", expanded: true });
+
+  saveConfig({ slim: false });
+  expect(saveUnsetConfig({ slim: "bubble", subStatusInline: true })).toEqual([]);
+  expect(loadConfig()).toMatchObject({ slim: false });
 });

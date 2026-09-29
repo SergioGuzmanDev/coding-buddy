@@ -1219,9 +1219,10 @@ inline_substatus_row() {
 }
 
 # Keeps the name in its column of the panel's last row, with the sub-status on its left. The slim layouts have
-# no name row, so the name stands at a fixed column before the feet, in room the sub-status does not need.
+# no name row, so the name stands at a fixed column before the feet, in room the sub-status does not need,
+# and stands there alone without a sub-status command.
 inline_name_row() {
-    [ "$SUBSTATUS_SINGLE" -eq 1 ] || return 0
+    [ "$SUBSTATUS_SINGLE" -eq 1 ] || { [ -n "$SLIM" ] && [ -z "$SUBSTATUS_COMMAND" ]; } || return 0
     local pad=$(( COLS - ART_W - SUBSTATUS_LEFT_W )) name=""
     [ "$pad" -ge 2 ] || return 0
     if [ -n "$SLIM" ] && [ -n "$NAME" ] && [ "$pad" -ge $(( NAME_W + 3 )) ]; then

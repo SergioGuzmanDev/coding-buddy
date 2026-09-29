@@ -20,7 +20,7 @@ import {
   claudeUserConfigPath,
   toUnixPath,
 } from "../server/path.ts";
-import { buddyStatusLineEntry, loadCompanion, saveCompanion, resolveUserId, writeStatusState } from "../server/state.ts";
+import { buddyStatusLineEntry, loadCompanion, saveCompanion, saveUnsetConfig, resolveUserId, writeStatusState, type BuddyConfig } from "../server/state.ts";
 import { generateFallbackName } from "../core/reactions.ts"
 import { copyRuntimeApp, stableRuntimePaths } from "./runtime-app.ts";
 
@@ -166,6 +166,14 @@ function installStatusLine(settings: Record<string, any>, appDir: string) {
   settings.statusLine = buddyStatusLineEntry(statusScript);
 
   ok("Status line configured (with animation refresh)");
+}
+
+// A new install starts slim: a two-row bubble beside the art, the name on the feet row and the sub-status inline.
+const FIRST_LAYOUT: Partial<BuddyConfig> = { slim: "bubble", subStatusInline: true, expanded: true, statuslineDensity: "minimal" };
+
+function installLayout() {
+  const set = saveUnsetConfig(FIRST_LAYOUT);
+  ok(set.length ? `Slim layout set: ${set.join(", ")}` : "Layout kept as configured");
 }
 
 // The tmux popup mode was removed in favour of the status line / buddy-shell
@@ -333,6 +341,7 @@ installSkill();
 
 stripLegacyPopupHooks(settings);
 installStatusLine(settings, appDir);
+installLayout();
 
 installHooks(settings, appDir);
 ensurePermissions(settings);

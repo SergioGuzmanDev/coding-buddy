@@ -480,6 +480,20 @@ export function saveConfig(config: Partial<BuddyConfig>): BuddyConfig {
   return merged;
 }
 
+/** Saves each of these settings that config.json does not set yet, so a choice already made stays; returns their names. */
+export function saveUnsetConfig(config: Partial<BuddyConfig>): string[] {
+  let current: unknown = {};
+  try {
+    current = JSON.parse(readFileSync(CONFIG_FILE(), "utf8"));
+  } catch {
+    // No config yet: every setting is unset.
+  }
+  const set = current && typeof current === "object" && !Array.isArray(current) ? current : {};
+  const unset = Object.fromEntries(Object.entries(config).filter(([key]) => !Object.hasOwn(set, key)));
+  if (Object.keys(unset).length) saveConfig(unset);
+  return Object.keys(unset);
+}
+
 /** Saves a #RRGGBB status line color, or drops it for "reset"; returns null for anything else. */
 export function saveColor(value: string): BuddyConfig | null {
   if (value === "reset") return saveConfig({ color: undefined });

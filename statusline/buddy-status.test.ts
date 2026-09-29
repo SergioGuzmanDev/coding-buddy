@@ -1298,7 +1298,7 @@ describe("buddy sub-status cache", () => {
 describe("slim layout", () => {
   const octopus = ["            \n   .----.   \n  ( o  o )  \n  (______)  \n  TENTACLES "];
 
-  function render(config: Record<string, unknown>, reaction: string, subStatus = "LEFT-SIDE-STATUS") {
+  function render(config: Record<string, unknown>, reaction: string, subStatus: string | null = "LEFT-SIDE-STATUS") {
     const { configDir, stateDir } = createStatuslineFixture({
       subStatusInline: true,
       expanded: true,
@@ -1309,7 +1309,7 @@ describe("slim layout", () => {
     });
     const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
     writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, level: 3, frames: octopus }));
-    writeFileSync(join(stateDir, ".substatus.default"), `${subStatus}\n`);
+    if (subStatus !== null) writeFileSync(join(stateDir, ".substatus.default"), `${subStatus}\n`);
     if (reaction) writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction, timestamp: Date.now() }));
     const raw = runStatusline(configDir, "{}\n", "150").stdout.toString();
     return { raw, plain: raw.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split("\n").filter(Boolean) };
@@ -1362,6 +1362,15 @@ describe("slim layout", () => {
       expect(raw).toContain("\x1b[2mNimbus\x1b[0m");
       expect(raw).not.toContain("coding-buddy://");
     }
+  });
+
+  test("puts the name on the feet row at the same column without a sub-status command", () => {
+    const column = render({}, "hola").plain.at(-1)!.indexOf("Nimbus");
+    const { plain } = render({ subStatusCommand: undefined }, "hola", null);
+
+    expect(plain).toHaveLength(4);
+    expect(plain.at(-1)).toMatch(/^ +Nimbus {3}TENTACLES/);
+    expect(plain.at(-1)!.indexOf("Nimbus")).toBe(column);
   });
 
   test("drops the name rather than cut the sub-status when the feet row is short", () => {

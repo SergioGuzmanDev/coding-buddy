@@ -6,6 +6,7 @@ This is Sergio's fork of [ramarivera/coding-buddy](https://github.com/ramarivera
 - Reactions written by their own model call after each turn, so your Claude session never spends a turn on them.
   Claude (Haiku) writes them by default. Gemini, through Google's Antigravity CLI (`agy`), is the option.
 - 50 emotes the octopus acts out while it talks, and colors for how it feels. Only the octopus has them.
+- A slim layout: the bubble takes two rows beside the octopus, and its name sits on the feet row.
 - On macOS with iTerm2: the bubble waits until you look at the tab, closes after 15 seconds, and cmd+click on
   the buddy's name reopens it.
 
@@ -77,8 +78,9 @@ cd ~/coding-buddy \
 ```
 
 The installer copies the clone to `~/.claude-buddy/app` and registers the MCP server, the `/buddy` skill, the hooks
-and the status line. The buddy's settings live in `~/.claude-buddy/config.json`. The later steps change them with
-this command, giving it the settings as JSON:
+and the status line. A first install also sets the slim layout; one that finds the layout already set keeps it.
+The buddy's settings live in `~/.claude-buddy/config.json`. The later steps change them with this command, giving it
+the settings as JSON:
 
 ```bash
 cd ~/coding-buddy && bun -e 'import { saveConfig } from "./server/state.ts"; saveConfig(JSON.parse(process.argv[1]));' '{"brain":"agy"}'
@@ -118,6 +120,14 @@ Only if the user wants them:
    there. If they chose the iTerm2 extras, they quit and reopen iTerm2 instead, and accept if it offers to download
    its Python runtime.
 3. Tell them to run `/buddy` to meet the buddy, and `/buddy help` for the commands.
+
+## Classic layout
+
+To give the bubble and the name their own rows again, run this in the clone:
+
+```bash
+cd ~/coding-buddy && bun -e 'import { saveConfig } from "./server/state.ts"; saveConfig(JSON.parse(process.argv[1]));' '{"slim":false,"subStatusInline":false,"expanded":false,"statuslineDensity":"auto"}'
+```
 
 ## More emotes
 
