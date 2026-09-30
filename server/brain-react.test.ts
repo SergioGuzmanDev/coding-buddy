@@ -38,11 +38,11 @@ function fakeCli(body: string): string {
   return bin;
 }
 
-/** agy that reports a spent quota, as it logs it, unless it runs under the second account's HOME. */
-function spentFirstAccount(secondHome: string): string {
+/** agy that reports a spent quota, as it logs it, unless it runs under the given HOME. */
+function spentUnlessHome(answeringHome: string): string {
   return `
     log=""; prev=""; for a in "$@"; do [ "$prev" = "--log-file" ] && log="$a"; prev="$a"; done
-    if [ "$HOME" != "${secondHome}" ]; then
+    if [ "$HOME" != "${answeringHome}" ]; then
       echo 'attempt 1 failed (RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h0m5s.)' > "$log"
       echo '{"error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached."}'; exit 1
     fi
@@ -220,7 +220,7 @@ describe("brain-react with brain agy", () => {
     mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
     writeFileSync(join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "{}");
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks* from the second account" }));
-    const bin = fakeCli(spentFirstAccount(home));
+    const bin = fakeCli(spentUnlessHome(home));
     let clock = 1_000_000;
     const react = () => reactWithBrain("reply", "ask", { bin, now: () => clock });
 
@@ -237,6 +237,46 @@ describe("brain-react with brain agy", () => {
     expect(callCount()).toBe(5);
   });
 
+  test("moves on to a third account while the first two are out of quota, and asks no spent one again", () => {
+    const signIn = (name: string) => {
+      const home = join(stateDir, name);
+      mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+      writeFileSync(join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "{}");
+      return home;
+    };
+    signIn("gemini-fallback-home");
+    const third = signIn("gemini-fallback-home-2");
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks* from the third account" }));
+    const bin = fakeCli(spentUnlessHome(third));
+    let clock = 1_000_000;
+    const react = () => reactWithBrain("reply", "ask", { bin, now: () => clock });
+
+    react();
+    expect(bubble().reaction).toBe("*quacks* from the third account");
+    expect(callCount()).toBe(3);
+
+    clock += 60_000;
+    react();
+    expect(callCount()).toBe(4);
+  });
+
+  test("asks no account while all are out of quota, and says when the first one comes back", () => {
+    const home = join(stateDir, "gemini-fallback-home");
+    mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+    writeFileSync(join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token"), "{}");
+    const bin = fakeCli(spentUnlessHome(join(root, "nobody")));
+    let clock = 1_000_000;
+    const react = () => reactWithBrain("reply", "ask", { bin, now: () => clock });
+
+    react();
+    expect(callCount()).toBe(2);
+
+    clock += 11 * 60_000;
+    react();
+    expect(callCount()).toBe(2);
+    expect(bubble().reaction).toStartWith("Sleeping, brain not responding. every agy account is out of quota until ");
+  });
+
   test("gives the second account its own unlocked keychain before each call, so macOS never asks where to keep the token", () => {
     const home = join(stateDir, "gemini-fallback-home");
     mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
@@ -247,7 +287,7 @@ describe("brain-react with brain agy", () => {
     writeFileSync(security, `#!/bin/sh\necho "$HOME $*" >> "${root}/security.log"\n[ "$1" = create-keychain ] && touch "$4"\nexit 0\n`);
     chmodSync(security, 0o755);
     process.env.PATH = `${join(root, "bin")}:${process.env.PATH}`;
-    const bin = fakeCli(spentFirstAccount(home));
+    const bin = fakeCli(spentUnlessHome(home));
     const keychain = join(home, "Library", "Keychains", "login.keychain-db");
     const securityCalls = () => readFileSync(join(root, "security.log"), "utf8").trim().split("\n");
 
@@ -262,7 +302,7 @@ describe("brain-react with brain agy", () => {
     const home = join(stateDir, "gemini-fallback-home");
     mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
 
-    reactWithBrain("reply", "ask", { bin: fakeCli(spentFirstAccount(home)) });
+    reactWithBrain("reply", "ask", { bin: fakeCli(spentUnlessHome(home)) });
 
     expect(callCount()).toBe(1);
     expect(bubble().reaction).toContain("RESOURCE_EXHAUSTED");

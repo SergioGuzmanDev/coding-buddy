@@ -7,7 +7,7 @@
 
 import { Database } from "bun:sqlite";
 import { spawnSync } from "child_process";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from "fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { Companion } from "../core/engine.ts";
@@ -210,17 +210,32 @@ function stderrReason(stderr: string, status: number | null): string {
 interface GeminiAccount {
   env?: NodeJS.ProcessEnv;
   agyDir: string;
+  quotaFile: string;
   prepare?: () => void;
 }
 
-/** A second account, signed in once with `HOME=<its home> agy`: that HOME hides the user's Keychain, so it cannot replace the first. */
-function fallbackAccount(stateDir: string): GeminiAccount | undefined {
-  const home = join(stateDir, "gemini-fallback-home");
-  const agyDir = join(home, ".gemini", "antigravity-cli");
-  // Signed out, agy would open a browser sign-in on every turn.
-  if (!existsSync(join(agyDir, "antigravity-oauth-token"))) return undefined;
-  const env = { ...process.env, HOME: home };
-  return { env, agyDir, prepare: () => openOwnKeychain(home, env) };
+const FALLBACK_HOME = /^gemini-fallback-home(?:-(\d+))?$/;
+
+/**
+ * More accounts, each signed in once with `HOME=<its home> agy`, in `gemini-fallback-home`, `-2`, `-3`...:
+ * that HOME hides the user's Keychain, so it cannot replace the first. Each keeps when its own quota comes back.
+ */
+function fallbackAccounts(stateDir: string): GeminiAccount[] {
+  let names: string[] = [];
+  try {
+    names = readdirSync(stateDir).filter((name) => FALLBACK_HOME.test(name));
+  } catch {
+    // No state dir yet: no accounts.
+  }
+  const order = (name: string) => Number(FALLBACK_HOME.exec(name)?.[1] ?? 1);
+  return names.sort((a, b) => order(a) - order(b)).flatMap((name) => {
+    const home = join(stateDir, name);
+    const agyDir = join(home, ".gemini", "antigravity-cli");
+    // Signed out, agy would open a browser sign-in on every turn.
+    if (!existsSync(join(agyDir, "antigravity-oauth-token"))) return [];
+    const env = { ...process.env, HOME: home };
+    return [{ env, agyDir, quotaFile: join(home, ".gemini_quota.json"), prepare: () => openOwnKeychain(home, env) }];
+  });
 }
 
 // agy also saves its token through the Keychain. With none under this HOME, macOS asks where to store it on every
@@ -338,27 +353,30 @@ function recentFailure(path: string, now: number): string | undefined {
   }
 }
 
-/** Asks the signed-in agy account, or the second one while the first one's quota is spent. */
+/** Asks the signed-in agy account, then each other one in turn while the ones before it are out of quota. */
 function askAgy(runtime: BrainReactRuntime, stateDir: string, now: () => number, prompt: string, cwd: string, moveNames: string[]): BrainAnswer {
   // agy keeps a ~25 KB log of every run in its own log directory and never deletes it; only the last one is kept here.
   const logFile = join(stateDir, ".gemini_last.log");
   const model = loadConfig().geminiModel;
-  const ask = (account: GeminiAccount): BrainAnswer => {
+  const signedIn: GeminiAccount = {
+    agyDir: runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli"),
+    quotaFile: join(stateDir, ".gemini_quota.json"),
+  };
+  const accounts = [signedIn, ...fallbackAccounts(stateDir)];
+  let answer: BrainAnswer | undefined;
+  for (const account of accounts) {
+    if (spentUntil(account.quotaFile) > now()) continue;
     rmSync(logFile, { force: true });
     account.prepare?.();
-    const answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
+    answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
     if (answer.conversationId) forgetConversation(answer.conversationId, account.agyDir);
-    return answer;
-  };
-  const signedIn: GeminiAccount = { agyDir: runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli") };
-  const fallback = fallbackAccount(stateDir);
-  const quotaFile = join(stateDir, ".gemini_quota.json");
-  if (fallback && spentUntil(quotaFile) > now()) return ask(fallback);
-  const answer = ask(signedIn);
-  const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
-  if (!resetsIn) return answer;
-  writeFileSync(quotaFile, JSON.stringify({ until: now() + resetsIn }));
-  return fallback ? ask(fallback) : answer;
+    const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
+    if (!resetsIn) return answer;
+    writeFileSync(account.quotaFile, JSON.stringify({ until: now() + resetsIn }));
+  }
+  if (answer) return answer;
+  const back = new Date(Math.min(...accounts.map((account) => spentUntil(account.quotaFile))));
+  return { error: `every agy account is out of quota until ${back.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` };
 }
 
 export function reactWithBrain(
