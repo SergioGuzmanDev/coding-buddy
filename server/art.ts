@@ -764,16 +764,17 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
       },
       {
-        // Looking closer needs something suspicious to look at, so only a reaction plays it.
-        name: "inspect",
-        does: "inspects something closely with a magnifying glass",
+        // It ends spotting something, which needs a reason, so only a reaction plays it.
+        name: "spyglass",
+        does: "scans the distance through a spyglass and spots something",
         frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)-(O)", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E} (O)- ", "  (______)/  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( .  . )  ", "  (______)  ", "  /\\/\\/\\/\\(O)"],
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)=[]", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  {E}=[==]", "  (______)/  ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  {E}=[==]", "  (______)/  ", "  \\/\\/\\/\\/  "],
+          ["            ", "   .----.  !", "  ( O  {E}=[==]", "  (______)/  ", "  /\\/\\/\\/\\  "],
         ],
-        faces: ["~({E}{E})~-(O)", "~({E}(O)-", "~(..)~(O)"],
-        sequence: [0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1],
+        faces: ["~({E}{E})~=[]", "~(-{E}=[==]", " (-{E}=[==]", "~(O{E}=[==]!"],
+        sequence: [0, 0, 1, 2, 1, 2, 1, 2, 3, 3, 3, 3],
       },
       {
         name: "cool",

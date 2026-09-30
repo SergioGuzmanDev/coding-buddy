@@ -145,7 +145,7 @@ describe("getStatusFrames", () => {
     idea: "\\!/", love: "<3", cry: "( T  T )", fume: "'.----.'", dizzy: "( o  O )", wink: "( @  - )",
     shrug: "\\_(______)_/", panic: "/( O  O )\\", gasp: "!!", blush: "( >//< )", ink: "%%%", squash: "__*",
     facepalm: "(//////)", clap: "(__><__)", nod: "( v  v )", headshake: "( =  = )", salute: ".----.__",
-    tableflip: "|_|", toast: "Y*", eyeroll: "(      )", mindblown: ".-  -.", laugh: "(__D___)", inspect: "(O)",
+    tableflip: "|_|", toast: "Y*", eyeroll: "(      )", mindblown: ".-  -.", laugh: "(__D___)", spyglass: "=[==]",
     cool: "[]-[]", surrender: "|~",
   };
   const marks = { ...poolMarks, ...cuedMarks };
