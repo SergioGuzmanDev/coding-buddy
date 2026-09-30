@@ -5,7 +5,7 @@ This is Sergio's fork of [ramarivera/coding-buddy](https://github.com/ramarivera
 
 - Reactions written by their own model call after each turn, so your Claude session never spends a turn on them.
   Claude (Haiku) writes them by default. Gemini, through Google's Antigravity CLI (`agy`), is the option.
-- 50 emotes the octopus acts out while it talks, and colors for how it feels. Only the octopus has them.
+- Emotes the octopus acts out while it talks, and colors for how it feels. Only the octopus has them.
 - A slim layout: the bubble takes two rows beside the octopus, and its name sits on the feet row.
 - On macOS with iTerm2: the bubble waits until you look at the tab, closes after 15 seconds, and cmd+click on
   the buddy's name reopens it.
@@ -59,7 +59,7 @@ the install again. If Claude Code does not find Git Bash afterwards, set `CLAUDE
 
 First tell the user, in their language:
 
-> Sergio only gave emotes to the octopus: 50 moves it acts out while it talks, and colors for its mood. Any other
+> Sergio only gave emotes to the octopus: moves it acts out while it talks, and colors for its mood. Any other
 > species reacts with a speech bubble but does not move. You can ask Claude to add emotes to your species later.
 
 Then ask these questions in one message:

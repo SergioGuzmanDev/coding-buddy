@@ -439,17 +439,6 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 0, 1, 1, 0, 0, 1, 1],
       },
       {
-        name: "read",
-        does: "reads a book",
-        frames: [
-          ["            ", "   .----.   ", "  (.  .  )  ", "  ([====])  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  (  .  .)  ", "  ([====])  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( .  . )  ", "  ([==/=])  ", "  /\\/\\/\\/\\  "],
-        ],
-        faces: ["~(. .)[==]", "~( ..)[==]", "~(..)[=/]"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 1, 1],
-      },
-      {
         name: "typing",
         does: "types on a tiny keyboard",
         frames: [
