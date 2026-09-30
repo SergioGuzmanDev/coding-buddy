@@ -439,16 +439,6 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         sequence: [0, 1, 0, 1, 0, 1, 0, 1],
       },
       {
-        name: "typing",
-        does: "types on a tiny keyboard",
-        frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (_/__\\_)  ", " [########] "],
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (_\\__/_)  ", " [########] "],
-        ],
-        faces: ["~({E}{E})/[#]", "~({E}{E})\\[#]"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-      },
-      {
         name: "music",
         does: "bobs its head to music on headphones",
         frames: [
@@ -762,19 +752,6 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         ],
         faces: ["~(^D^)~ha", "~(>D<)~ha!"],
         sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-      },
-      {
-        // It ends spotting something, which needs a reason, so only a reaction plays it.
-        name: "spyglass",
-        does: "scans the distance through a spyglass and spots something",
-        frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)=[]", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( -  {E}=[==]", "  (______)/  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( -  {E}=[==]", "  (______)/  ", "  \\/\\/\\/\\/  "],
-          ["            ", "   .----.  !", "  ( O  {E}=[==]", "  (______)/  ", "  /\\/\\/\\/\\  "],
-        ],
-        faces: ["~({E}{E})~=[]", "~(-{E}=[==]", " (-{E}=[==]", "~(O{E}=[==]!"],
-        sequence: [0, 0, 1, 2, 1, 2, 1, 2, 3, 3, 3, 3],
       },
       {
         name: "cool",

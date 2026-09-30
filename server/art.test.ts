@@ -138,14 +138,14 @@ describe("getStatusFrames", () => {
     cigarette: "(______)===*", pipe: "(______)___u", wave: "(______)__/", jump: "' '' '", coffee: "c[_]",
     sleep: "( -  - ) z", look: "(@  @  )", dance: "   (______)", yawn: "(__O___)",
     think: "?", camouflage: "(::::::)", bubbles: "(______)o", peek: "~~~~~~", fish: "<><", stretch: "-(______)-",
-    typing: "[########]", music: "_.----._", dumbbell: "o=o", yoyo: "/0", meditate: "(_/\\/\\_)",
+    music: "_.----._", dumbbell: "o=o", yoyo: "/0", meditate: "(_/\\/\\_)",
     tap: "( -  @ )", paint: "._.", hiccup: "hic",
   };
   const cuedMarks = {
     idea: "\\!/", love: "<3", cry: "( T  T )", fume: "'.----.'", dizzy: "( o  O )", wink: "( @  - )",
     shrug: "\\_(______)_/", panic: "/( O  O )\\", gasp: "!!", blush: "( >//< )", ink: "%%%", squash: "__*",
     facepalm: "(//////)", clap: "(__><__)", nod: "( v  v )", headshake: "( =  = )", salute: ".----.__",
-    tableflip: "|_|", toast: "Y*", eyeroll: "(      )", mindblown: ".-  -.", laugh: "(__D___)", spyglass: "=[==]",
+    tableflip: "|_|", toast: "Y*", eyeroll: "(      )", mindblown: ".-  -.", laugh: "(__D___)",
     cool: "[]-[]", surrender: "|~",
   };
   const marks = { ...poolMarks, ...cuedMarks };
@@ -167,7 +167,7 @@ describe("getStatusFrames", () => {
     for (const mark of Object.values(poolMarks)) expect(frameSequence.some((i) => frames[i].includes(mark))).toBe(true);
     for (const face of [
       " *===~(", " u___~(", ")~/", "_(@@)_", "c[_]", "~(--)~z", "~(@@ )~", "/(@@)/", "~(>O<)~", "~(@@)~??", ":(@@):",
-      "~(@@)~oO", "~~(@@)~~", "~(@@)~ <><", "--(><)--", "~(@@)/[#]", "d(@@)b", "~(@@)~ o=o",
+      "~(@@)~oO", "~~(@@)~~", "~(@@)~ <><", "--(><)--", "d(@@)b", "~(@@)~ o=o",
       "~(@@)~--0", "_(--)_ om", "~(-@)~/'", "~(@@)~/|#|", "~(>o)~hic",
     ]) {
       expect(frameSequence.some((i) => minimalFrames[i].includes(face))).toBe(true);
