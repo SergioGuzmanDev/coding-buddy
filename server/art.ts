@@ -262,7 +262,7 @@ export const STATUS_FRAME_SEQUENCE: readonly number[] = [
 ];
 
 // Offsets into a smoke action's frames: a drag, the smoke, a second drag.
-const SMOKE_SEQUENCE = [0, 0, 1, 1, 2, 3, 3, 0, 1, 1, 2, 3, 3, 0];
+const SMOKE_SEQUENCE = [0, 0, 1, 1, 2, 3, 0, 0, 1, 1, 2, 3, 0, 0];
 
 // name and does are what the brain picks from to act out its reaction; see server/brain-react.ts.
 type StatusMove = { name: string; does: string; frames: string[][]; faces: string[]; sequence: number[]; tiredWeight?: number };
@@ -319,7 +319,7 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
           ["            ", "   .----.   /", "  ( {E}  {E} )  |", "  (______)__/", "  /\\/\\/\\/\\  "],
         ],
         faces: ["~({E}{E})~\\", "~({E}{E})~/"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1],
+        sequence: [0, 1, 0, 1, 0, 1, 0, 1],
       },
       {
         // The panel cannot grow, so the jump crouches one row down first and the resting height reads as air.
@@ -436,7 +436,7 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
           ["            ", "   .----.   ", "  ( -  - )  ", "~-(______)-~", "  \\/\\/\\/\\/  "],
         ],
         faces: ["--(><)--", "~-(--)-~"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1],
+        sequence: [0, 1, 0, 1, 0, 1, 0, 1],
       },
       {
         name: "typing",
@@ -479,7 +479,7 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
           ["            ", "   .----.   ", "  ( {E}  {E} ) |", "  (______)/0 ", "  /\\/\\/\\/\\  "],
         ],
         faces: ["~({E}{E})~0", "~({E}{E})~--0", "~({E}{E})~-0"],
-        sequence: [0, 0, 2, 2, 1, 1, 2, 2, 0, 0, 2, 2, 1, 1],
+        sequence: [0, 2, 1, 2, 0, 2, 1, 2, 0, 2, 1, 2, 0, 2],
       },
       {
         name: "meditate",
@@ -501,7 +501,7 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
           ["            ", "   .----.   ", "  ( -  {E} ) '", "  (______)  ", "  /\\/\\/\\/\\/ "],
         ],
         faces: ["~(-{E})~_", "~(-{E})~/'"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0],
+        sequence: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
       },
       {
         name: "paint",
@@ -535,7 +535,7 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
           ["            ", "*  .----.  *", " -( ^  ^ )- ", "  (______)  ", "  /\\/\\/\\/\\  "],
         ],
         faces: ["\\(^^)/", "*-(^^)-*"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1],
+        sequence: [0, 1, 0, 1, 0, 1, 0, 1],
       },
       {
         name: "idea",
@@ -585,7 +585,7 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
           ["            ", "   .----.   ", " /( O  O )\\ ", "  (______)  ", "  \\/\\/\\/\\/  "],
         ],
         faces: ["\\(OO)/!", "/(OO)\\"],
-        sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+        sequence: [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
       },
       {
         name: "gasp",

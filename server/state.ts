@@ -639,9 +639,10 @@ export function writeStatusState(
 
 export const CLAUDE_SETTINGS_PATH = claudeSettingsPath();
 
-// Every tick runs the whole renderer in each session; the octopus actions still move when sampled every 2s.
+// Every tick runs the whole renderer in the focused session and reprints a cached render in the others. A second is
+// the shortest interval Claude Code allows, and the quick octopus moves change pose on each one.
 export function buddyStatusLineEntry(statusScript: string) {
-  return { type: "command", command: toUnixPath(statusScript), refreshInterval: 2 };
+  return { type: "command", command: toUnixPath(statusScript), refreshInterval: 1 };
 }
 
 /**

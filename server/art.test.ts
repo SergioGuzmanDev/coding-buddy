@@ -10,6 +10,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOODS, STATUS_MOVES, statusMoveChoices, truncateDisplayWidth } from "./art.ts";
 import { SPECIES_ART as CORE_SPECIES_ART } from "../core/art-data.ts";
+import { buddyStatusLineEntry } from "./state.ts";
 import { SPECIES, EYES, type BuddyBones } from "../core/engine.ts"
 function readCodepointRanges(path: string): number[] {
   const ranges = readFileSync(path, "utf8")
@@ -187,11 +188,25 @@ describe("getStatusFrames", () => {
     for (const face of minimalFrames) expect(displayWidth(face), face).toBeLessThanOrEqual(11);
   });
 
-  test("every octopus move still moves when the status line samples every other second", () => {
+  test("the smoke rises, and the tentacles and the yo-yo move, one pose a second", () => {
+    const sequence = (name: string) => [...pool, ...cued].find((move) => move.name === name)!.sequence;
+    const held = (seq: number[], pose: number) => {
+      let longest = 0;
+      for (let i = 0, run = 0; i < seq.length; i++) longest = Math.max(longest, (run = seq[i] === pose ? run + 1 : 0));
+      return longest;
+    };
+    for (const name of ["wave", "stretch", "tap", "celebrate", "panic", "yoyo"]) {
+      for (const pose of new Set(sequence(name))) expect(held(sequence(name), pose), `${name} pose ${pose}`).toBe(1);
+    }
+    for (const name of ["cigarette", "pipe"]) for (const puff of [2, 3]) expect(held(sequence(name), puff), `${name} puff ${puff}`).toBe(1);
+  });
+
+  test("every octopus move still moves when sampled at the status line's refresh interval", () => {
+    const every = buddyStatusLineEntry("buddy-status.sh").refreshInterval;
     const moving = (frames: string[], sequence: number[], label: string) => {
       const resting = new Set(STATUS_FRAME_SEQUENCE.map((i) => frames[i]));
-      for (const parity of [0, 1]) {
-        const shown = new Set(sequence.filter((_, tick) => tick % 2 === parity).map((i) => frames[i]));
+      for (let parity = 0; parity < every; parity++) {
+        const shown = new Set(sequence.filter((_, tick) => tick % every === parity).map((i) => frames[i]));
         expect([...shown].filter((frame) => !resting.has(frame)).length, `${label} at parity ${parity}`).toBeGreaterThanOrEqual(2);
       }
     };

@@ -28,7 +28,7 @@ describe("buddy statusline settings patch", () => {
     expect(result.statusLine.type).toBe("command");
     expect(result.statusLine.command).toContain("buddy-status.sh");
     expect(result.statusLine.padding).toBeUndefined();
-    expect(result.statusLine.refreshInterval).toBe(2);
+    expect(result.statusLine.refreshInterval).toBe(1);
     expect(result.other).toBe("value");
   });
 
