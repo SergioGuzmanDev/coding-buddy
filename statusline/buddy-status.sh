@@ -218,13 +218,9 @@ _is_positive_int() {
 COLS=0
 ROWS=0
 
-# Claude Code renders this command inside a content box, not across the full
-# terminal. Reserve two columns for settings.json padding (1 per side) and
-# twelve for Claude Code's internal left/right content margins. The 14-column
-# reserve is calibrated against the reported ~74-column content box; the
-# regression fixture is rendered at 60, 80, and 120 columns to assert the
-# resulting budget before output.
-CHROME_RESERVE=14
+# Claude Code indents the status line two columns and cuts a row with "…" two columns short of the right
+# edge, so the buddy ends exactly there; the move frames are as wide as the widest move, so none is cut.
+CHROME_RESERVE=4
 STATUSLINE_WIDTH_ADJUST=0
 
 ROWS=0

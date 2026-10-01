@@ -17,7 +17,8 @@ import { displayWidth } from "../server/art.ts";
 
 const temporaryDirectories: string[] = [];
 const statuslineScript = join(import.meta.dir, "buddy-status.sh");
-const chromeReserve = Number(readFileSync(statuslineScript, "utf8").match(/^CHROME_RESERVE=([0-9]+)/m)?.[1] ?? 0);
+// Claude Code indents the status line 2 columns and cuts a row with "…" past 2 more on the right.
+const claudeCodeChrome = 4;
 
 function createStatuslineFixture(config: Record<string, unknown>) {
   const configDir = mkdtempSync(join(tmpdir(), "coding-buddy-substatus-"));
@@ -158,7 +159,7 @@ describe("buddy statusline colors", () => {
     expect(result.status).toBe(0);
     expect(lines.every((line) => line.length <= columns)).toBe(true);
     expect(result.stdout.toString().split("\n").filter(Boolean).every((line) => displayWidth(line) <= columns)).toBe(true);
-    const budget = columns >= 40 ? Math.min(columns, Math.max(40, columns - chromeReserve)) : columns;
+    const budget = columns >= 40 ? Math.min(columns, Math.max(40, columns - claudeCodeChrome)) : columns;
     expect(result.stdout.toString().split("\n").filter(Boolean).every((line) => displayWidth(line) <= budget)).toBe(true);
     expect(Math.max(...lines.map((line) => displayWidth(line)))).toBe(budget);
     const connectorLine = result.stdout.toString().split("\n").find((line) => line.includes("--"));
@@ -181,7 +182,7 @@ describe("buddy statusline colors", () => {
     const lines = result.stdout.toString().split("\n").filter(Boolean);
 
     expect(result.status).toBe(0);
-    expect(lines.every((line) => displayWidth(line) <= 56)).toBe(true);
+    expect(lines.every((line) => displayWidth(line) <= 80 - claudeCodeChrome - 10)).toBe(true);
   });
 
   test("BUDDY_STATUSLINE_COLS wins over exported COLUMNS", () => {
@@ -207,7 +208,7 @@ describe("buddy statusline colors", () => {
     const lines = result.stdout.toString().split("\n").filter(Boolean);
 
     expect(result.status).toBe(0);
-    expect(lines.every((line) => displayWidth(line) <= 46)).toBe(true);
+    expect(lines.every((line) => displayWidth(line) <= 60 - claudeCodeChrome)).toBe(true);
   });
 
   test("exported COLUMNS wins over a wider controlling PTY", () => {
@@ -262,7 +263,7 @@ describe("buddy statusline colors", () => {
       .filter(Boolean);
 
     expect(result.status).toBe(0);
-    expect(lines.every((line) => displayWidth(line) <= 46)).toBe(true);
+    expect(lines.every((line) => displayWidth(line) <= 60 - claudeCodeChrome)).toBe(true);
   });
 
   test("invalid BUDDY_STATUSLINE_COLS values are ignored and fall through", () => {
@@ -293,7 +294,7 @@ describe("buddy statusline colors", () => {
       const lines = result.stdout.toString().split("\n").filter(Boolean);
 
       expect(result.status).toBe(0);
-      expect(lines.every((line) => displayWidth(line) <= 46)).toBe(true);
+      expect(lines.every((line) => displayWidth(line) <= 60 - claudeCodeChrome)).toBe(true);
     }
   });
 
@@ -451,7 +452,7 @@ describe("buddy sub-status cache", () => {
     expect(result.stdout.toString()).toContain("reaction 🏆");
 
     expect(result.status).toBe(0);
-    expect(lines.every((line) => displayWidth(line) <= 46)).toBe(true);
+    expect(lines.every((line) => displayWidth(line) <= 60 - claudeCodeChrome)).toBe(true);
   });
 
   test("a muted buddy prints nothing", () => {
@@ -514,8 +515,8 @@ describe("buddy sub-status cache", () => {
 
     const row = runStatusline(configDir, "{}\n", "60").stdout.toString().split("\n").find((l) => l.includes("AAAA"));
 
-    expect(row!.length).toBeLessThanOrEqual(46);
-    expect(row!.match(/A+/)![0]).toHaveLength(45);
+    expect(row!.length).toBeLessThanOrEqual(60 - claudeCodeChrome);
+    expect(row!.match(/A+/)![0]).toHaveLength(60 - claudeCodeChrome - 1);
   });
 
   test("measures a sub-status OSC 8 link by its visible text only", () => {
@@ -531,7 +532,7 @@ describe("buddy sub-status cache", () => {
   test("closes a sub-status OSC 8 link cut by the budget", () => {
     const { configDir, stateDir } = createStatuslineFixture({ subStatusCommand: "printf ignored" });
     const open = "\x1b]8;;https://example.org/branch\x1b\\";
-    writeFileSync(join(stateDir, ".substatus.default"), `${"x".repeat(40)} (${open}feature-branch\x1b]8;;\x1b\\)\n`);
+    writeFileSync(join(stateDir, ".substatus.default"), `${"x".repeat(60 - claudeCodeChrome - 6)} (${open}feature-branch\x1b]8;;\x1b\\)\n`);
 
     const row = runStatusline(configDir, "{}\n", "60").stdout.toString().split("\n").find((l) => l.includes(open));
 
@@ -582,13 +583,14 @@ describe("buddy sub-status cache", () => {
       subStatusInline: true,
       subStatusCommand: "printf ignored",
     });
-    writeFileSync(join(stateDir, ".substatus.default"), `${"W".repeat(60)}\n`);
+    const wide = "W".repeat(80 - claudeCodeChrome - 6);
+    writeFileSync(join(stateDir, ".substatus.default"), `${wide}\n`);
 
     const lines = runStatusline(configDir, "{}\n", "80").stdout.toString().split("\n").filter(Boolean);
 
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain("Nimbus");
-    expect(lines[1]).toStartWith("W".repeat(60));
+    expect(lines[1]).toStartWith(wide);
   });
 
   test("clickToExpand links the name to coding-buddy://toggle", () => {
@@ -625,11 +627,12 @@ describe("buddy sub-status cache", () => {
       expanded: true,
       subStatusCommand: "printf ignored",
     });
-    writeFileSync(join(stateDir, ".substatus.default"), `${"W".repeat(100)}\n`);
+    const wide = "W".repeat(120 - claudeCodeChrome - 6);
+    writeFileSync(join(stateDir, ".substatus.default"), `${wide}\n`);
 
     const lines = runStatusline(configDir, "{}\n", "120").stdout.toString().split("\n").filter(Boolean);
 
-    expect(lines.at(-1)).toBe("W".repeat(100));
+    expect(lines.at(-1)).toBe(wide);
     expect(lines.at(-2)).toContain("Nimbus");
   });
 
