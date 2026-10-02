@@ -219,8 +219,10 @@ COLS=0
 ROWS=0
 
 # Claude Code indents the status line two columns and cuts a row with "…" two columns short of the right
-# edge, so the buddy ends exactly there; the move frames are as wide as the widest move, so none is cut.
+# edge. The move frames are as wide as the widest move, so a buddy that ends there has no move cut.
 CHROME_RESERVE=4
+# The buddy stands this much further left, and moves right only as far as an inline sub-status needs.
+BUDDY_RIGHT_GAP=10
 STATUSLINE_WIDTH_ADJUST=0
 
 ROWS=0
@@ -829,26 +831,44 @@ fi
 # than every art row; include that width before sizing the card.
 [ "$NAME_LINE_W" -gt "$ART_W" ] && ART_W="$NAME_LINE_W"
 
-STATUSLINE_BUDGET=$(( DETECTED_COLS - CHROME_RESERVE + STATUSLINE_WIDTH_ADJUST ))
-# Preserve the existing compact-card behavior at the smallest supported
-# terminal size; the reserve applies once there is enough room for chrome.
-if [ "$DETECTED_COLS" -ge 40 ] 2>/dev/null && [ "$STATUSLINE_BUDGET" -lt 40 ]; then
-    STATUSLINE_BUDGET=40
-fi
-[ "$STATUSLINE_BUDGET" -gt "$DETECTED_COLS" ] && STATUSLINE_BUDGET="$DETECTED_COLS"
+# Sets FIT_W to the detected width less $1 columns of reserve.
+fit_width() {
+    FIT_W=$(( DETECTED_COLS - $1 + STATUSLINE_WIDTH_ADJUST ))
+    # Preserve the existing compact-card behavior at the smallest supported
+    # terminal size; the reserve applies once there is enough room for chrome.
+    if [ "$DETECTED_COLS" -ge 40 ] 2>/dev/null && [ "$FIT_W" -lt 40 ]; then
+        FIT_W=40
+    fi
+    [ "$FIT_W" -gt "$DETECTED_COLS" ] && FIT_W="$DETECTED_COLS"
 
-# The sprite and its identifying name are the irreducible minimum of the card.
-# Never let the chrome reserve push the usable budget below the sprite's own
-# width; if it does, fall back to the raw terminal width. If the terminal
-# itself is narrower than the sprite, use the historical default rather than
-# slicing art or name.
-if [ "$STATUSLINE_BUDGET" -lt "$ART_W" ]; then
-    STATUSLINE_BUDGET="$DETECTED_COLS"
+    # The sprite and its identifying name are the irreducible minimum of the card.
+    # Never let the chrome reserve push the usable budget below the sprite's own
+    # width; if it does, fall back to the raw terminal width. If the terminal
+    # itself is narrower than the sprite, use the historical default rather than
+    # slicing art or name.
+    if [ "$FIT_W" -lt "$ART_W" ]; then
+        FIT_W="$DETECTED_COLS"
+    fi
+    if [ "$FIT_W" -lt "$ART_W" ]; then
+        FIT_W=125
+    fi
+}
+fit_width "$CHROME_RESERVE"
+STATUSLINE_BUDGET="$FIT_W"
+fit_width $(( CHROME_RESERVE + BUDDY_RIGHT_GAP ))
+# On a terminal too narrow for the gap, fit_width falls back to the whole width, past Claude Code's edge.
+SPOT_COLS=$(( FIT_W < STATUSLINE_BUDGET ? FIT_W : STATUSLINE_BUDGET ))
+COLS="$SPOT_COLS"
+
+# Mirrors inline_name_row: the name takes NAME_W + 3 columns before the feet, and a row too short for it keeps 2.
+if [ "$TIER" != "minimal" ] && [ "$SUBSTATUS_INLINE" -eq 1 ] && [ "$SUBSTATUS_SINGLE" -eq 1 ]; then
+    _needs=$(( ART_W + SUBSTATUS_LEFT_W + 2 ))
+    [ -n "$SLIM" ] && [ -n "$NAME" ] && _needs="$(( ART_W + SUBSTATUS_LEFT_W + NAME_W + 3 )) $_needs"
+    for _need in $_needs; do
+        [ "$_need" -le "$COLS" ] && break
+        [ "$_need" -le "$STATUSLINE_BUDGET" ] && COLS="$_need" && break
+    done
 fi
-if [ "$STATUSLINE_BUDGET" -lt "$ART_W" ]; then
-    STATUSLINE_BUDGET=125
-fi
-COLS="$STATUSLINE_BUDGET"
 
 # ─── Density branch: compact drops the bubble; minimal is a single line. ─────
 if [ "$TIER" = "minimal" ]; then
@@ -879,7 +899,7 @@ if [ "$TIER" = "minimal" ]; then
     if [ "$STATUSLINE_BUDGET" -lt "$_min_w" ]; then
         STATUSLINE_BUDGET="$DETECTED_COLS"
     fi
-    COLS="$STATUSLINE_BUDGET"
+    [ "$COLS" -ge "$_min_w" ] || COLS="$STATUSLINE_BUDGET"
     ART_LINES=("$_min_plain")
     ALL_COLORS=("$C")
     ALL_LINES=("$_min_plain")
@@ -1200,9 +1220,10 @@ inline_substatus_row() {
     local buddy buddy_w room text_room text reaction_part=""
     [ "$SUBSTATUS_SINGLE" -eq 1 ] || return 0
     local left="$SUBSTATUS_LEFT"
-    room=$(( STATUSLINE_BUDGET - SUBSTATUS_LEFT_W - 2 ))
     buddy="$_face_name"
     buddy_w=$(dwidth "$buddy")
+    room=$(( SPOT_COLS - SUBSTATUS_LEFT_W - 2 ))
+    [ "$buddy_w" -le "$room" ] || room=$(( STATUSLINE_BUDGET - SUBSTATUS_LEFT_W - 2 ))
     [ "$buddy_w" -le "$room" ] || return 0
     text_room=$(( room - buddy_w - 5 ))
     if [ -n "$REACTION" ] && [ "$text_room" -ge 8 ]; then

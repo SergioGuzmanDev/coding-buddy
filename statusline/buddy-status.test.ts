@@ -19,6 +19,8 @@ const temporaryDirectories: string[] = [];
 const statuslineScript = join(import.meta.dir, "buddy-status.sh");
 // Claude Code indents the status line 2 columns and cuts a row with "…" past 2 more on the right.
 const claudeCodeChrome = 4;
+// The buddy's own spot, short of that edge, which it leaves only when an inline sub-status needs the room.
+const buddySpotReserve = 14;
 
 function createStatuslineFixture(config: Record<string, unknown>) {
   const configDir = mkdtempSync(join(tmpdir(), "coding-buddy-substatus-"));
@@ -159,9 +161,9 @@ describe("buddy statusline colors", () => {
     expect(result.status).toBe(0);
     expect(lines.every((line) => line.length <= columns)).toBe(true);
     expect(result.stdout.toString().split("\n").filter(Boolean).every((line) => displayWidth(line) <= columns)).toBe(true);
-    const budget = columns >= 40 ? Math.min(columns, Math.max(40, columns - claudeCodeChrome)) : columns;
-    expect(result.stdout.toString().split("\n").filter(Boolean).every((line) => displayWidth(line) <= budget)).toBe(true);
-    expect(Math.max(...lines.map((line) => displayWidth(line)))).toBe(budget);
+    const fit = (reserve: number) => (columns >= 40 ? Math.min(columns, Math.max(40, columns - reserve)) : columns);
+    expect(result.stdout.toString().split("\n").filter(Boolean).every((line) => displayWidth(line) <= fit(claudeCodeChrome))).toBe(true);
+    expect(Math.max(...lines.map((line) => displayWidth(line)))).toBe(fit(buddySpotReserve));
     const connectorLine = result.stdout.toString().split("\n").find((line) => line.includes("--"));
     expect(connectorLine).toContain("\x1b[38;2;78;186;101m");
     expect(lines.some((line) => /\|.*\|-- /.test(line))).toBe(true);
@@ -561,6 +563,39 @@ describe("buddy sub-status cache", () => {
     expect(lines[0]).toContain("…");
   });
 
+  test("the one-row buddy stands at its spot beside a sub-status, and moves right only when it leaves no room there", () => {
+    const { configDir, stateDir } = createStatuslineFixture({
+      statuslineDensity: "minimal",
+      subStatusInline: true,
+      subStatusCommand: "printf ignored",
+    });
+    const row = (status: string) => {
+      writeFileSync(join(stateDir, ".substatus.default"), `${status}\n`);
+      return runStatusline(configDir, "{}\n", "80").stdout.toString().replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split("\n")[0];
+    };
+    const short = row("LEFT-SIDE-STATUS");
+    const buddyWidth = displayWidth(short) - short.lastIndexOf("art Nimbus");
+    const long = "L".repeat(80 - buddySpotReserve - 2 - buddyWidth + 1);
+
+    expect(displayWidth(short)).toBe(80 - buddySpotReserve);
+    expect(row(long)).toStartWith(long);
+    expect(row(long)).toContain("Nimbus");
+    expect(displayWidth(row(long))).toBe(80 - claudeCodeChrome);
+  });
+
+  test("the one-row buddy stands at its spot, and moves right only for a reaction that does not fit there", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "minimal" });
+    const row = () => runStatusline(configDir, "{}\n", "80").stdout.toString().replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").split("\n")[0];
+    const quiet = row();
+    const buddyWidth = displayWidth(quiet) - quiet.indexOf("art Nimbus");
+    const reaction = "r".repeat(80 - claudeCodeChrome - buddyWidth - ' │ ""'.length - 2);
+    writeFileSync(join(stateDir, "reaction.default.json"), JSON.stringify({ reaction, timestamp: Date.now() }));
+
+    expect(displayWidth(quiet)).toBe(80 - buddySpotReserve);
+    expect(row()).toContain(reaction);
+    expect(displayWidth(row())).toBe(80 - claudeCodeChrome);
+  });
+
   test("inline mode leaves a multi-line sub-status below the buddy", () => {
     const { configDir, stateDir } = createStatuslineFixture({
       statuslineDensity: "minimal",
@@ -634,6 +669,7 @@ describe("buddy sub-status cache", () => {
 
     expect(lines.at(-1)).toBe(wide);
     expect(lines.at(-2)).toContain("Nimbus");
+    expect(Math.max(...lines.slice(0, -1).map(displayWidth))).toBe(120 - buddySpotReserve);
   });
 
   test("a configured color replaces the rarity color", () => {
@@ -1376,9 +1412,21 @@ describe("slim layout", () => {
     expect(plain.at(-1)!.indexOf("Nimbus")).toBe(column);
   });
 
-  test("drops the name rather than cut the sub-status when the feet row is short", () => {
-    const artColumn = render({}, "").plain.at(-1)!.indexOf("TENTACLES") - "  ".length;
+  test("moves the whole buddy right, only as far as the sub-status needs, to keep the name on the feet row", () => {
+    const atSpot = render({}, "").plain;
+    const artColumn = atSpot.at(-1)!.indexOf("TENTACLES") - "  ".length;
     const status = "S".repeat(artColumn - "Nimbus".length);
+    const { plain } = render({}, "", status);
+
+    expect(plain.at(-1)).toMatch(new RegExp(`^${status}  Nimbus {3}TENTACLES`));
+    const shift = plain.at(-1)!.indexOf("TENTACLES") - atSpot.at(-1)!.indexOf("TENTACLES");
+    expect(shift).toBeGreaterThan(0);
+    expect(plain[0].indexOf(".----.")).toBe(atSpot[0].indexOf(".----.") + shift);
+  });
+
+  test("drops the name rather than cut the sub-status when the feet row is short even at the edge", () => {
+    const artColumn = render({}, "").plain.at(-1)!.indexOf("TENTACLES") - "  ".length;
+    const status = "S".repeat(artColumn + buddySpotReserve - claudeCodeChrome - "Nimbus".length);
     const { plain } = render({}, "", status);
 
     expect(plain.at(-1)).toMatch(new RegExp(`^${status} +TENTACLES`));
