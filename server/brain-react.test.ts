@@ -301,6 +301,32 @@ describe("brain-react with brain agy", () => {
     expect(securityCalls().slice(2)).toEqual([`${home} unlock-keychain -p  ${keychain}`]);
   });
 
+  test("asks an account whose token agy keeps in its own keychain, and skips one whose keychain holds none", () => {
+    const keychainAccount = (name: string, signedIn: boolean) => {
+      const home = join(stateDir, name);
+      mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });
+      mkdirSync(join(home, "Library", "Keychains"), { recursive: true });
+      writeFileSync(join(home, "Library", "Keychains", "login.keychain-db"), "");
+      if (signedIn) writeFileSync(join(home, "token-in-keychain"), "");
+      return home;
+    };
+    keychainAccount("gemini-fallback-home", false);
+    const third = keychainAccount("gemini-fallback-home-2", true);
+    writeFileSync(join(root, "bin", "security"), `#!/bin/sh
+if [ "$1" = find-generic-password ]; then
+  [ "$2 $3 $4 $5" = "-s gemini -a antigravity" ] && [ "$6" = "$HOME/Library/Keychains/login.keychain-db" ] && [ -f "$HOME/token-in-keychain" ] && exit 0
+  exit 44
+fi
+exit 0
+`);
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks* from the keychain account" }));
+
+    reactWithBrain("reply", "ask", { bin: fakeCli(spentUnlessHome(third)) });
+
+    expect(bubble().reaction).toBe("*quacks* from the keychain account");
+    expect(callCount()).toBe(2);
+  });
+
   test("never runs a second account that is not signed in", () => {
     const home = join(stateDir, "gemini-fallback-home");
     mkdirSync(join(home, ".gemini", "antigravity-cli"), { recursive: true });

@@ -231,17 +231,31 @@ function fallbackAccounts(stateDir: string): GeminiAccount[] {
   return names.sort((a, b) => order(a) - order(b)).flatMap((name) => {
     const home = join(stateDir, name);
     const agyDir = join(home, ".gemini", "antigravity-cli");
-    // Signed out, agy would open a browser sign-in on every turn.
-    if (!existsSync(join(agyDir, "antigravity-oauth-token"))) return [];
     const env = { ...process.env, HOME: home };
+    // Signed out, agy would open a browser sign-in on every turn.
+    if (!signedIn(home, agyDir, env)) return [];
     return [{ env, agyDir, quotaFile: join(home, ".gemini_quota.json"), prepare: () => openOwnKeychain(home, env) }];
   });
+}
+
+// agy keeps the token in a file when its HOME had no keychain at sign-in, and in that keychain otherwise.
+function signedIn(home: string, agyDir: string, env: NodeJS.ProcessEnv): boolean {
+  if (existsSync(join(agyDir, "antigravity-oauth-token"))) return true;
+  const keychain = ownKeychain(home);
+  if (!existsSync(keychain)) return false;
+  spawnSync("security", ["unlock-keychain", "-p", "", keychain], { env });
+  const lookup = ["find-generic-password", "-s", "gemini", "-a", "antigravity", keychain];
+  return spawnSync("security", lookup, { env, stdio: "ignore" }).status === 0;
+}
+
+function ownKeychain(home: string): string {
+  return join(home, "Library", "Keychains", "login.keychain-db");
 }
 
 // agy also saves its token through the Keychain. With none under this HOME, macOS asks where to store it on every
 // refresh; with a locked one, after a reboot, it asks for the password.
 function openOwnKeychain(home: string, env: NodeJS.ProcessEnv): void {
-  const keychain = join(home, "Library", "Keychains", "login.keychain-db");
+  const keychain = ownKeychain(home);
   if (!existsSync(keychain)) {
     mkdirSync(join(home, "Library", "Keychains"), { recursive: true });
     spawnSync("security", ["create-keychain", "-p", "", keychain], { env });
