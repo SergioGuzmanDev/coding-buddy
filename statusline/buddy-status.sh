@@ -423,6 +423,7 @@ if [ -n "$ACHIEVEMENT" ] && [ "$ACHIEVEMENT" != "null" ]; then
 fi
 
 REACTION_MOVE_SECONDS=30
+MOOD_SECONDS=120
 MOVE_AFTER_FOCUS_SECONDS=3
 BUBBLE_FOCUSED_SECONDS=15
 READ_ON_SECONDS=5
@@ -555,8 +556,9 @@ elif [ "$TIRED" = true ]; then
     MOVE=tired
 fi
 # A frozen status line would keep the move's first frame, so only an animated one acts it out.
-# The move and its mood color share SINCE_REACTION, so both wait for focus together.
+# The move and its mood color count from the same second, so both wait for focus together; the color outlasts the move.
 SINCE_REACTION=-1
+SINCE_MOOD=-1
 _move_seconds=$REACTION_MOVE_SECONDS
 if [ "$GATED" -eq 1 ]; then
     _move_seconds=$BUBBLE_FOCUSED_SECONDS
@@ -567,6 +569,8 @@ else
 fi
 [ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE$REACTION_MOOD" ] && [ "$_move_from" -ge 0 ] \
     && [ $(( NOW - _move_from )) -lt "$_move_seconds" ] && SINCE_REACTION=$(( NOW - _move_from ))
+[ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOOD" ] && [ "$_move_from" -ge 0 ] \
+    && [ $(( NOW - _move_from )) -lt "$MOOD_SECONDS" ] && SINCE_MOOD=$(( NOW - _move_from ))
 # The drop comes and goes while sweating. A frozen status line has no clock to blink by, so it keeps it.
 SWEAT_DRAWN=false
 [ "$SWEAT" = true ] && [ $(( (ANIMATE ? NOW : 0) % SWEAT_EVERY_SECONDS )) -lt "$SWEAT_SHOWN_SECONDS" ] && SWEAT_DRAWN=true
@@ -574,7 +578,7 @@ SWEAT_DRAWN=false
 # after it; a first play holds them all off. The loop rests between moves, so a rest since the click marks a new one.
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
     --argjson sweat "$SWEAT_DRAWN" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
-    --argjson since_reaction "$SINCE_REACTION" --argjson replay "$REPLAY" '
+    --argjson since_reaction "$SINCE_REACTION" --argjson since_mood "$SINCE_MOOD" --argjson replay "$REPLAY" '
     def at($sequence; $t): $sequence[$t % ($sequence | length)];
     [.moveSequences[]?[]] as $move_frames
     | def moving: IN($move_frames[]);
@@ -592,7 +596,7 @@ FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --
            then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
        else $scheduled end) as $idx
     | ((.moodColors[$reaction_mood] // []) as $mood
-       | if $since_reaction >= 0 and ($mood | length) > 0 then $mood[($since_reaction / 2 | floor) % ($mood | length)] else "" end) as $mood_color
+       | if $since_mood >= 0 and ($mood | length) > 0 then $mood[($since_mood / 2 | floor) % ($mood | length)] else "" end) as $mood_color
     | ((($set[0] // .frames[0] // "") | split("\n")[0] | test("^\\s*$")) | if . then "trim" else "keep" end)
       + " " + $mood_color + "\n" + (($set[$idx] // .frames[$idx]) // "")
 ' "$STATE" 2>/dev/null)

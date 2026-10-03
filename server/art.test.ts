@@ -270,15 +270,14 @@ describe("getStatusFrames", () => {
     expect(moveSequences!.celebrate.every((i) => frames[i].includes("( ^  ^ )"))).toBe(true);
   });
 
-  test("every mood the brain can pick carries hex colors, angry blinking back to the buddy's own", () => {
+  test("every mood the brain can pick carries hex colors, and only excited takes turns between them", () => {
     const { moodColors } = getStatusFrames(octopus);
 
     expect(Object.keys(moodColors!).sort()).toEqual(Object.keys(STATUS_MOODS).sort());
-    for (const colors of Object.values(moodColors!)) {
-      expect(colors.length).toBeGreaterThan(0);
-      for (const color of colors) expect(color).toMatch(/^(#[0-9A-F]{6})?$/);
+    for (const [mood, colors] of Object.entries(moodColors!)) {
+      for (const color of colors) expect(color, mood).toMatch(/^#[0-9A-F]{6}$/);
+      if (mood !== "excited") expect(colors, mood).toHaveLength(1);
     }
-    expect(moodColors!.angry).toContain("");
     expect(new Set(moodColors!.excited).size).toBeGreaterThanOrEqual(5);
   });
 

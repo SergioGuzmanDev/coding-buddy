@@ -790,7 +790,7 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, {}, { ...at, ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
     });
 
-    describe("under animate focused, the bubble, move and mood last 15 seconds from 3 seconds of focus after the reaction", () => {
+    describe("under animate focused, the bubble and move last 15 seconds from 3 seconds of focus after the reaction, the mood 2 minutes", () => {
       const clock = Math.floor(Date.now() / 1000);
       const red = "\x1b[38;2;255;0;0m";
       const reopenLink = /\x1b\]8;;coding-buddy:\/\/reopen\/default\x1b\\(?:\x1b\[2m)?Nimbus/;
@@ -814,7 +814,7 @@ describe("buddy sub-status cache", () => {
         return { ...made, reaction, focus, gate, cache, react, tick, touch, reopen };
       };
 
-      test("already focused when it arrives, all three start 3 seconds after the reaction and end together 15 seconds later", () => {
+      test("already focused when it arrives, all three start 3 seconds after the reaction, and the mood outlasts the other two", () => {
         const { reaction, focus, react, tick, touch } = setup();
         react(1);
         touch(focus, -100);
@@ -833,8 +833,10 @@ describe("buddy sub-status cache", () => {
         expect(last).toContain("*sorbe*");
         const closed = tick(17);
         expect(closed).toContain("art-rest");
-        expect(closed).not.toContain(red);
+        expect(closed).toContain(red);
         expect(closed).not.toContain("*sorbe*");
+        expect(tick(2 + 120 - 1)).toContain(red);
+        expect(tick(2 + 120)).not.toContain(red);
       });
 
       test("focused after it arrives, it counts 3 seconds from the first focused render, without rewriting its state meanwhile", () => {
@@ -1149,7 +1151,7 @@ describe("buddy sub-status cache", () => {
       });
     });
 
-    test("paints the buddy, not its bubble, with the reaction's mood for 30 seconds, each color lasting 2 ticks", () => {
+    test("paints the buddy, not its bubble, with the reaction's mood for 2 minutes, each color lasting 2 ticks", () => {
       const { configDir, stateDir } = fixture({ moodColors: { angry: ["#FF0000", ""] } });
       const clock = Math.floor(Date.now() / 1000);
       const reacted = (secondsAgo: number, mood: string) => {
@@ -1166,8 +1168,8 @@ describe("buddy sub-status cache", () => {
       expect(reacted(2, "angry")).toContain(`${own}  art-rest`);
       expect(reacted(3, "angry")).toContain(`${own}  art-rest`);
       expect(reacted(4, "angry")).toContain(`${red}  art-rest`);
-      expect(reacted(29, "angry")).toContain(`${red}  art-rest`);
-      expect(reacted(30, "angry")).not.toContain(red);
+      expect(reacted(117, "angry")).toContain(`${red}  art-rest`);
+      expect(reacted(120, "angry")).not.toContain(red);
       expect(reacted(1, "furious")).not.toContain(red);
     });
 

@@ -778,10 +778,10 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
   },
 };
 
-// The brain picks one with each reaction, and the status line paints the buddy with it while the reaction's
-// move plays. Colors take turns every two ticks; "" is the buddy's own color, so angry blinks.
+// The brain picks one with each reaction, and the status line paints the buddy with it for MOOD_SECONDS
+// (statusline/buddy-status.sh). Colors take turns every two ticks.
 export const STATUS_MOODS: Record<string, { feels: string; colors: string[] }> = {
-  angry: { feels: "angry", colors: ["#FF5555", ""] },
+  angry: { feels: "angry", colors: ["#FF5555"] },
   excited: { feels: "thrilled", colors: ["#FF3232", "#FF8C00", "#FFDC00", "#32D232", "#3278FF", "#6432DC", "#B432DC"] },
   happy: { feels: "pleased", colors: ["#FFD75F"] },
   embarrassed: { feels: "embarrassed", colors: ["#FF87D7"] },
