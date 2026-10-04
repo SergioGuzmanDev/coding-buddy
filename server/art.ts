@@ -293,24 +293,24 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         name: "cigarette",
         does: "smokes a cigarette",
         frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«===*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«===*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} )   «~»", "  (______)«===*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.    «~»", "  ( {E}  {E} )  «~»", "  (______)«===*»", "  \\/\\/\\/\\/  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )   «~»", "  (______)«==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    «~»", "  ( {E}  {E} )  «~»", "  (______)«==={ember}*»", "  \\/\\/\\/\\/  "],
         ],
-        faces: [" «*===»~({E}{E})~", " «*===»~(--)~", "«°*===»~({E}{E})~", "«~*===»~({E}{E})~"],
+        faces: [" «{ember}*»«===»~({E}{E})~", " «{ember}*»«===»~(--)~", "«°»«{ember}*»«===»~({E}{E})~", "«~»«{ember}*»«===»~({E}{E})~"],
         sequence: SMOKE_SEQUENCE,
       },
       {
         name: "pipe",
         does: "smokes a pipe",
         frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«___u»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«___u»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} )   «~»", "  (______)«___u»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.    «~»", "  ( {E}  {E} )  «~»", "  (______)«___u»", "  \\/\\/\\/\\/  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«{wood}___u»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«{wood}___u»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )   «~»", "  (______)«{wood}___u»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    «~»", "  ( {E}  {E} )  «~»", "  (______)«{wood}___u»", "  \\/\\/\\/\\/  "],
         ],
-        faces: [" «u___»~({E}{E})~", " «u___»~(--)~", "«°u___»~({E}{E})~", "«~u___»~({E}{E})~"],
+        faces: [" «{wood}u___»~({E}{E})~", " «{wood}u___»~(--)~", "«°»«{wood}u___»~({E}{E})~", "«~»«{wood}u___»~({E}{E})~"],
         sequence: SMOKE_SEQUENCE,
       },
       {
@@ -813,10 +813,17 @@ function withSweat(frame: string): string {
 }
 
 // «» mark what a move holds in its frames and faces. They reach the status line as these two invisible
-// characters, so a mood that repaints the buddy leaves the objects its own color.
+// characters, so a mood that repaints the buddy leaves the objects its own color. Inside them, {ember} draws
+// the rest of the object in that color of PROP_COLORS, whatever paints the buddy.
 const PROP_START = "\x01";
 const PROP_END = "\x02";
-const markProps = (text: string) => text.replace(/«/g, PROP_START).replace(/»/g, PROP_END);
+const PROP_COLORS: Record<string, string> = { ember: "#FF4500", wood: "#A0522D" };
+const hexSgr = (hex: string) => `\x1b[38;2;${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(";")}m`;
+const markProps = (text: string) =>
+  text
+    .replace(/«/g, PROP_START)
+    .replace(/»/g, PROP_END)
+    .replace(/\{(\w+)\}/g, (tag, name: string) => (PROP_COLORS[name] ? hexSgr(PROP_COLORS[name]) : tag));
 
 // Every 30 seconds: one normal cycle, then an action padded with resting ticks to another cycle.
 const ACTION_SLOT_TICKS = STATUS_FRAME_SEQUENCE.length;

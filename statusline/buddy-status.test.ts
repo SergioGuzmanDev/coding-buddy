@@ -784,6 +784,21 @@ describe("buddy sub-status cache", () => {
       expect(displayWidth(face.split("\n")[0])).toBe(80 - buddySpotReserve);
     });
 
+    test("an object drawn in its own color keeps it, with or without a mood, and loses it without color", () => {
+      const ember = "\x1b[38;2;255;69;0m";
+      const red = "\x1b[38;2;255;0;0m";
+      const { configDir, stateDir } = fixture({ frames: ["  art-rest", `  (body)\u0001===${ember}*\u0002`], frameSequence: [1], moodColors: { angry: ["#FF0000"] } });
+
+      expect(render(configDir, {})).toContain(`===${ember}*`);
+      writeFileSync(join(stateDir, "background-mood.json"), JSON.stringify({ scores: { angry: 3 }, at: 0, mood: "angry", until: (now + 600) * 1000 }));
+      const moody = render(configDir, {});
+      expect(moody).toContain(`===${ember}*${red}`);
+      const bare = render(configDir, {}, { NO_COLOR: "1" });
+      expect(bare).toContain("  (body)===*");
+      expect(bare).not.toContain("\x1b[");
+      expect(Math.max(...bare.split("\n").map(displayWidth))).toBe(80 - buddySpotReserve);
+    });
+
     test("an unfocused tab, which does not animate, shows the mood it has been in lately too", () => {
       const { configDir, stateDir } = fixture({ moodColors: { angry: ["#FF0000"] } }, { animate: "focused" });
       writeFileSync(join(stateDir, "focused-session"), "AAA");

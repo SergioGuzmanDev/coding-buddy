@@ -682,7 +682,7 @@ if [ "$COLOR_ENABLED" -eq 0 ]; then
 fi
 
 # The frames mark what a move holds between \001 and \002. A mood paints the buddy's body but not those
-# objects, which keep its own color; the art is measured without the marks.
+# objects, which keep its own color, or the color server/art.ts gives them.
 ALL_LINES=()
 ALL_COLORS=()
 _arc=0
@@ -699,7 +699,6 @@ for line in "${ART_LINES[@]}"; do
     ALL_COLORS+=("$_row_c")
     _arc=$(( _arc + 1 ))
 done
-ART_LINES=("${ART_LINES[@]//[$'\001'$'\002']/}")
 [ -n "$SLIM" ] || { ALL_LINES+=("$NAME_LINE"); ALL_COLORS+=("$C"); }
 
 ART_COUNT=${#ALL_LINES[@]}
@@ -829,6 +828,13 @@ SUBSTATUS_LEFT=""
 SUBSTATUS_PLAIN=""
 SUBSTATUS_SINGLE=0
 [ "$SUBSTATUS_INLINE" -eq 1 ] && load_single_substatus
+
+# The art is measured plain, and without color it loses the objects' own colors too.
+for _ai in "${!ART_LINES[@]}"; do
+    ansi_strip "${ART_LINES[$_ai]//[$'\001'$'\002']/}"
+    ART_LINES[$_ai]="$ANSI_PLAIN"
+    [ "$COLOR_ENABLED" -eq 1 ] || { ansi_strip "${ALL_LINES[$_ai]}"; ALL_LINES[$_ai]="$ANSI_PLAIN"; }
+done
 
 WORDS=()
 [ -n "$BUBBLE_TEXT" ] && read -r -a WORDS <<< "$BUBBLE_TEXT"

@@ -98,8 +98,8 @@ describe("truncateDisplayWidth", () => {
 
 });
 
-// The shape tests read frames as drawn; the marks around the objects a move holds are tested on their own.
-const unmarked = (text: string) => text.replace(/[\x01\x02]/g, "");
+// The shape tests read frames as drawn; the marks and colors of the objects a move holds are tested on their own.
+const unmarked = (text: string) => text.replace(/[\x01\x02]|\x1b\[[0-9;]*m/g, "");
 function getStatusFrames(...args: Parameters<typeof markedStatusFrames>): ReturnType<typeof markedStatusFrames> {
   const made = markedStatusFrames(...args);
   const plain = (texts: string[]) => texts.map(unmarked);
@@ -266,7 +266,7 @@ describe("getStatusFrames", () => {
 
   test("marks the objects a move holds, and never the octopus, so a mood leaves them the buddy's own color", () => {
     const { frames, minimalFrames } = markedStatusFrames(octopus);
-    const held = (texts: string[]) => texts.flatMap((text) => [...text.matchAll(/\x01([^\x02]*)\x02/g)].map((m) => m[1]));
+    const held = (texts: string[]) => texts.flatMap((text) => [...text.matchAll(/\x01([^\x02]*)\x02/g)].map((m) => unmarked(m[1])));
     const objects = [...held(frames), ...held(minimalFrames)];
 
     for (const object of ["===*", "___u", "c[_]", "<><", "o=o", "|#|", "|_|", "Y", "[]-[]", "|~", "%%%", "d", "b", "0", "x"]) {
@@ -274,6 +274,17 @@ describe("getStatusFrames", () => {
     }
     for (const body of ["(", ")", ".----.", "______", "/\\/\\", "@"]) expect(objects.filter((held) => held.includes(body)), body).toEqual([]);
     for (const text of [...frames, ...minimalFrames]) expect(text.replace(/\x01[^\x02]*\x02/g, ""), JSON.stringify(text)).not.toMatch(/[\x01\x02]/);
+  });
+
+  test("the cigarette's ember glows red and the pipe is wood brown, in the frames and the one-row faces", () => {
+    const { frames, minimalFrames } = markedStatusFrames(octopus);
+    const ember = "\x1b[38;2;255;69;0m";
+    const wood = "\x1b[38;2;160;82;45m";
+
+    for (const texts of [frames, minimalFrames]) {
+      expect(texts.some((text) => text.includes(`===${ember}*\x02`) || text.includes(`${ember}*\x02\x01===`))).toBe(true);
+      expect(texts.some((text) => text.includes(`${wood}___u\x02`) || text.includes(`${wood}u___\x02`))).toBe(true);
+    }
   });
 
   test("a tired octopus sleeps or yawns in at least half of its moves, a rested one far less", () => {
