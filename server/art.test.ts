@@ -8,7 +8,7 @@
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { displayWidth, getArtFrame, getStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOODS, STATUS_MOVES, statusMoveChoices, truncateDisplayWidth } from "./art.ts";
+import { displayWidth, getArtFrame, getStatusFrames as markedStatusFrames, resolveEyeGlyph, STATUS_FRAME_SEQUENCE, STATUS_MOODS, STATUS_MOVES, statusMoveChoices, truncateDisplayWidth } from "./art.ts";
 import { SPECIES_ART as CORE_SPECIES_ART } from "../core/art-data.ts";
 import { buddyStatusLineEntry } from "./state.ts";
 import { SPECIES, EYES, type BuddyBones } from "../core/engine.ts"
@@ -97,6 +97,20 @@ describe("truncateDisplayWidth", () => {
   });
 
 });
+
+// The shape tests read frames as drawn; the marks around the objects a move holds are tested on their own.
+const unmarked = (text: string) => text.replace(/[\x01\x02]/g, "");
+function getStatusFrames(...args: Parameters<typeof markedStatusFrames>): ReturnType<typeof markedStatusFrames> {
+  const made = markedStatusFrames(...args);
+  const plain = (texts: string[]) => texts.map(unmarked);
+  return {
+    ...made,
+    frames: plain(made.frames),
+    compactFrames: plain(made.compactFrames),
+    minimalFrames: plain(made.minimalFrames),
+    sweat: { frames: plain(made.sweat.frames), compactFrames: plain(made.sweat.compactFrames), minimalFrames: plain(made.sweat.minimalFrames) },
+  };
+}
 
 describe("getStatusFrames", () => {
   const bones = (overrides: Partial<BuddyBones> = {}): BuddyBones => ({
@@ -248,6 +262,18 @@ describe("getStatusFrames", () => {
       expect(played.some((move) => cuedNames.includes(move)), mood).toBe(true);
       expect(played.filter((move) => cuedNames.includes(move) && !favors.includes(move)), mood).toEqual([]);
     }
+  });
+
+  test("marks the objects a move holds, and never the octopus, so a mood leaves them the buddy's own color", () => {
+    const { frames, minimalFrames } = markedStatusFrames(octopus);
+    const held = (texts: string[]) => texts.flatMap((text) => [...text.matchAll(/\x01([^\x02]*)\x02/g)].map((m) => m[1]));
+    const objects = [...held(frames), ...held(minimalFrames)];
+
+    for (const object of ["===*", "___u", "c[_]", "<><", "o=o", "|#|", "|_|", "Y", "[]-[]", "|~", "%%%", "d", "b", "0", "x"]) {
+      expect(objects.some((held) => held.includes(object)), object).toBe(true);
+    }
+    for (const body of ["(", ")", ".----.", "______", "/\\/\\", "@"]) expect(objects.filter((held) => held.includes(body)), body).toEqual([]);
+    for (const text of [...frames, ...minimalFrames]) expect(text.replace(/\x01[^\x02]*\x02/g, ""), JSON.stringify(text)).not.toMatch(/[\x01\x02]/);
   });
 
   test("a tired octopus sleeps or yawns in at least half of its moves, a rested one far less", () => {

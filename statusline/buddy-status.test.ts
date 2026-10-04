@@ -762,6 +762,28 @@ describe("buddy sub-status cache", () => {
       expect(at(0)).toContain(`${red}  art-rest`);
     });
 
+    test("a mood paints the buddy's body, and the objects a move holds keep its own color", () => {
+      const red = "\x1b[38;2;255;0;0m";
+      const own = "\x1b[38;2;153;153;153m";
+      const angry = JSON.stringify({ scores: { angry: 3 }, at: 0, mood: "angry", until: (now + 600) * 1000 });
+      const full = fixture({ frames: ["  art-rest", "  (body)\u0001PROP\u0002"], frameSequence: [1], moodColors: { angry: ["#FF0000"] } });
+      const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
+
+      const calm = render(full.configDir, {});
+      expect(calm).toContain(`${own}  (body)${own}PROP${own}`);
+      writeFileSync(join(full.stateDir, "background-mood.json"), angry);
+      const moody = render(full.configDir, {});
+      expect(moody).toContain(`${red}  (body)${own}PROP${red}`);
+      expect(plain(moody)).toContain("  (body)PROP");
+      expect(moody).not.toMatch(/[\x01\x02]/);
+
+      const oneRow = fixture({ minimalFrames: ["~(oo)~\u0001c[_]\u0002"], frameSequence: [0], moodColors: { angry: ["#FF0000"] } }, { statuslineDensity: "minimal" });
+      writeFileSync(join(oneRow.stateDir, "background-mood.json"), angry);
+      const face = render(oneRow.configDir, {});
+      expect(face).toContain(`${red}~(oo)~${own}c[_]${red} Nimbus`);
+      expect(displayWidth(face.split("\n")[0])).toBe(80 - buddySpotReserve);
+    });
+
     test("an unfocused tab, which does not animate, shows the mood it has been in lately too", () => {
       const { configDir, stateDir } = fixture({ moodColors: { angry: ["#FF0000"] } }, { animate: "focused" });
       writeFileSync(join(stateDir, "focused-session"), "AAA");

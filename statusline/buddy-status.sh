@@ -662,6 +662,7 @@ NAME_PAD=$(( ART_CENTER - NAME_LEN / 2 ))
 printf -v NAME_LINE '%*s%s' "$NAME_PAD" '' "$NAME_WITH_LEVEL"
 
 BC="${BC:-$C}"
+OWN_C="$C"
 # The mood repaints the buddy only; the bubble keeps its color so the reaction stays readable.
 [[ "$MOOD_COLOR" =~ ^#[0-9A-Fa-f]{6}$ ]] && _hex_to_ansi C "$MOOD_COLOR"
 # Italic only: faint on top of italic made the bubble text hard to read.
@@ -669,6 +670,7 @@ ITALIC=$'\033[3m'
 FAINT=$'\033[2m'
 if [ "$COLOR_ENABLED" -eq 0 ]; then
     C=""
+    OWN_C=""
     BC=""
     NC=""
     NEUTRAL=""
@@ -679,18 +681,25 @@ if [ "$COLOR_ENABLED" -eq 0 ]; then
     done
 fi
 
+# The frames mark what a move holds between \001 and \002. A mood paints the buddy's body but not those
+# objects, which keep its own color; the art is measured without the marks.
 ALL_LINES=()
 ALL_COLORS=()
 _arc=0
 for line in "${ART_LINES[@]}"; do
-    ALL_LINES+=("$line")
     if [ "$SHINY" = "true" ] && [ -z "$MOOD_COLOR" ]; then
-        ALL_COLORS+=("${RAINBOW[$(( (_arc + RAINBOW_OFFSET) % RAINBOW_LEN ))]}")
+        _row_c="${RAINBOW[$(( (_arc + RAINBOW_OFFSET) % RAINBOW_LEN ))]}"
     else
-        ALL_COLORS+=("$C")
+        _row_c="$C"
     fi
+    _prop_c="$_row_c"
+    [ -n "$MOOD_COLOR" ] && _prop_c="$OWN_C"
+    line="${line//$'\001'/$_prop_c}"
+    ALL_LINES+=("${line//$'\002'/$_row_c}")
+    ALL_COLORS+=("$_row_c")
     _arc=$(( _arc + 1 ))
 done
+ART_LINES=("${ART_LINES[@]//[$'\001'$'\002']/}")
 [ -n "$SLIM" ] || { ALL_LINES+=("$NAME_LINE"); ALL_COLORS+=("$C"); }
 
 ART_COUNT=${#ALL_LINES[@]}
@@ -890,13 +899,11 @@ fi
 
 # ─── Density branch: compact drops the bubble; minimal is a single line. ─────
 if [ "$TIER" = "minimal" ]; then
-    _face_plain="${ART_LINES[0]:-}"
-    if [ -z "$_face_plain" ]; then
-        for _fline in "${ART_LINES[@]}"; do
-            [ -n "$_fline" ] && _face_plain="$_fline" && break
-        done
-    fi
-    [ -z "$_face_plain" ] && _face_plain=$'    (°°)    '
+    _face_plain=""
+    for _fi in "${!ART_LINES[@]}"; do
+        [ -n "${ART_LINES[$_fi]}" ] && _face_plain="${ART_LINES[$_fi]}" && _face_painted="${ALL_LINES[$_fi]}" && break
+    done
+    [ -z "$_face_plain" ] && _face_plain=$'    (°°)    ' && _face_painted="$_face_plain"
     _face_name="${_face_plain}${NAME_WITH_LEVEL:+ $NAME_WITH_LEVEL}"
     _min_plain="$_face_name"
     _min_w=$(dwidth "$_min_plain")
@@ -920,7 +927,7 @@ if [ "$TIER" = "minimal" ]; then
     [ "$COLS" -ge "$_min_w" ] || COLS="$STATUSLINE_BUDGET"
     ART_LINES=("$_min_plain")
     ALL_COLORS=("$C")
-    ALL_LINES=("$_min_plain")
+    ALL_LINES=("${_face_painted}${_min_plain#"$_face_plain"}")
     ART_COUNT=1
     ART_W="$_min_w"
     BUBBLE=""
@@ -1250,7 +1257,7 @@ inline_substatus_row() {
         reaction_part=" │ \"${text}\""
         buddy_w=$(dwidth "${buddy}${reaction_part}")
     fi
-    printf '%s%*s%s%s%s%s%s' "$left" $(( room - buddy_w + 2 )) '' "$C" "$buddy" "$BC" "$reaction_part" "$NC"
+    printf '%s%*s%s%s%s%s%s' "$left" $(( room - buddy_w + 2 )) '' "$C" "${_face_painted}${buddy#"$_face_plain"}" "$BC" "$reaction_part" "$NC"
 }
 
 # Keeps the name in its column of the panel's last row, with the sub-status on its left. The slim layouts have
