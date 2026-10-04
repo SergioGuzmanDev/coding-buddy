@@ -779,14 +779,22 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
 };
 
 // The brain picks one with each reaction, and the status line paints the buddy with it for MOOD_SECONDS
-// (statusline/buddy-status.sh). Colors take turns every two ticks.
-export const STATUS_MOODS: Record<string, { feels: string; colors: string[] }> = {
-  angry: { feels: "angry", colors: ["#FF5555"] },
-  excited: { feels: "thrilled", colors: ["#FF3232", "#FF8C00", "#FFDC00", "#32D232", "#3278FF", "#6432DC", "#B432DC"] },
-  happy: { feels: "pleased", colors: ["#FFD75F"] },
-  embarrassed: { feels: "embarrassed", colors: ["#FF87D7"] },
-  sad: { feels: "down", colors: ["#5FAFFF"] },
+// (statusline/buddy-status.sh), its colors taking turns every two ticks. A mood the buddy has been in lately
+// (server/background-mood.ts) shows its first color, steady, and makes the moves it favors come up more often,
+// the cued ones among them too: the mood is their reason.
+export const STATUS_MOODS: Record<string, { feels: string; colors: string[]; favors: string[] }> = {
+  angry: { feels: "angry", colors: ["#FF5555"], favors: ["tap", "dumbbell", "cigarette", "fume", "tableflip", "headshake"] },
+  excited: {
+    feels: "thrilled",
+    colors: ["#FF8C00", "#FFDC00", "#32D232", "#3278FF", "#6432DC", "#B432DC", "#FF3232"],
+    favors: ["jump", "dance", "yoyo", "celebrate", "clap"],
+  },
+  happy: { feels: "pleased", colors: ["#FFD75F"], favors: ["dance", "music", "wave", "nod", "wink"] },
+  embarrassed: { feels: "embarrassed", colors: ["#FF87D7"], favors: ["camouflage", "peek", "blush", "facepalm"] },
+  sad: { feels: "down", colors: ["#5FAFFF"], favors: ["sleep", "bubbles", "meditate", "cry"] },
 };
+// About half the slots of a mood's loop go to the moves it favors.
+const FAVORED_WEIGHT = 4;
 
 /** The moves the brain may act out with a reaction: the pool and the cued moves. */
 export function statusMoveChoices(species: Species): StatusMove[] {
@@ -817,6 +825,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   tiredSequence?: number[];
   idleSequence?: number[];
   moveSequences?: Record<string, number[]>;
+  moodSequences?: Record<string, number[]>;
   moodColors?: Record<string, string[]>;
   sweat: { frames: string[]; compactFrames: string[]; minimalFrames: string[] };
 } {
@@ -860,6 +869,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
   let tiredSequence: number[] | undefined;
   let idleSequence: number[] | undefined;
   let moveSequences: Record<string, number[]> | undefined;
+  let moodSequences: Record<string, number[]> | undefined;
   const moves = STATUS_MOVES[bones.species];
   if (moves) {
     const firsts = new Map<StatusMove, number>();
@@ -878,17 +888,21 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
     const played = (move: StatusMove) => move.sequence.map((offset) => firsts.get(move)! + offset);
     // The status line only replays these sequences, so each slot's move is drawn here, in a 20-minute
     // loop that is drawn again whenever status.json is rewritten.
-    const drawSlots = (weight: (move: StatusMove) => number) => {
-      const total = moves.pool.reduce((sum, move) => sum + weight(move), 0);
+    const drawSlots = (candidates: StatusMove[], weight: (move: StatusMove) => number) => {
+      const total = candidates.reduce((sum, move) => sum + weight(move), 0);
       return Array.from({ length: ACTION_PATTERN_SLOTS }, () => {
         let left = random() * total;
-        const move = moves.pool.find((m) => (left -= weight(m)) < 0) ?? moves.pool[moves.pool.length - 1];
+        const move = candidates.find((m) => (left -= weight(m)) < 0) ?? candidates[candidates.length - 1];
         const moved = played(move);
         return [...STATUS_FRAME_SEQUENCE, ...moved, ...Array(ACTION_SLOT_TICKS - moved.length).fill(0)];
       }).flat();
     };
-    frameSequence = drawSlots(() => 1);
-    tiredSequence = drawSlots((move) => move.tiredWeight ?? 1);
+    frameSequence = drawSlots(moves.pool, () => 1);
+    tiredSequence = drawSlots(moves.pool, (move) => move.tiredWeight ?? 1);
+    moodSequences = Object.fromEntries(Object.entries(STATUS_MOODS).map(([name, mood]) => {
+      const favored = (move: StatusMove) => mood.favors.includes(move.name);
+      return [name, drawSlots([...moves.pool, ...moves.cued.filter(favored)], (move) => (favored(move) ? FAVORED_WEIGHT : 1))];
+    }));
     idleSequence = played(moves.idle);
     moveSequences = Object.fromEntries(statusMoveChoices(bones.species).map((move) => [move.name, played(move)]));
   }
@@ -901,6 +915,7 @@ export function getStatusFrames(bones: BuddyBones, random: () => number = Math.r
     tiredSequence,
     idleSequence,
     moveSequences,
+    moodSequences,
     moodColors: moves ? Object.fromEntries(Object.entries(STATUS_MOODS).map(([name, mood]) => [name, mood.colors])) : undefined,
     sweat: {
       frames: sweatFrames,

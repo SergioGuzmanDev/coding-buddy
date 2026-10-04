@@ -57,6 +57,7 @@ import {
 } from "./path";
 import { getReaction } from "../core/reactions.ts"
 import { renderCompanionCardMarkdown } from "./art";
+import { soothe } from "./background-mood";
 import {
   incrementEvent, checkAndAward, trackActiveDay,
   renderAchievementsCardMarkdown,
@@ -201,6 +202,7 @@ server.tool(
       companion.bones.rarity,
     );
     saveReaction(reaction, "pet", "fallback");
+    soothe(buddyStateDir());
     writeStatusState(companion, reaction);
     incrementEvent("pets", 1, activeSlot());
     awardXp("buddy_pet", activeSlot(), companion.bones.species, companion.bones.rarity);

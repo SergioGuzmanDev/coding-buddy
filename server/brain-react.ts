@@ -12,6 +12,7 @@ import { homedir } from "os";
 import { join } from "path";
 import type { Companion } from "../core/engine.ts";
 import { STATUS_MOODS, statusMoveChoices } from "./art.ts";
+import { currentBackgroundMood, feelMood } from "./background-mood.ts";
 import { buddyStateDir } from "./path.ts";
 import { loadCompanion, loadConfig, saveReaction, sessionId } from "./state.ts";
 
@@ -139,6 +140,7 @@ export function buildPrompt(
   userMessage: string,
   earlier = "",
   look: BuddyLook = { sweating: false, contextPct: 0, tired: false },
+  lately = "",
 ): string {
   const b = companion.bones;
   const moves = statusMoveChoices(b.species);
@@ -148,6 +150,9 @@ export function buildPrompt(
     `Strongest trait: ${b.peak}. Weakest trait: ${b.dump}.`,
     ...(look.sweating ? [sweatLine(look.contextPct)] : []),
     ...(look.tired ? ["You are tired: most of the developer's 5-hour usage limit is spent."] : []),
+    ...(STATUS_MOODS[lately]
+      ? [`Lately you have been feeling ${STATUS_MOODS[lately].feels}. It lingers in your tone, but this exchange may make you feel otherwise.`]
+      : []),
     "",
     "Write ONE in-character reaction to the latest exchange below. It must fit a small speech bubble: 3 or 4 short lines, about 40 characters each.",
     "Point at something specific from it: a pitfall, a win, a risk, a pattern. Use the earlier conversation only to understand it.",
@@ -414,13 +419,16 @@ export function reactWithBrain(
     const earlier = runtime.transcriptPath
       ? earlierConversation(runtime.transcriptPath, [assistantMessage, userMessage])
       : "";
-    const prompt = buildPrompt(companion, assistantMessage, userMessage, earlier, lookToTell(stateDir));
+    const prompt = buildPrompt(
+      companion, assistantMessage, userMessage, earlier, lookToTell(stateDir), currentBackgroundMood(stateDir, now()),
+    );
     const moveNames = statusMoveChoices(companion.bones.species).map((m) => m.name);
     const answer = agy
       ? askAgy(runtime, stateDir, now, prompt, cwd, moveNames)
       : askClaude(runtime.bin ?? "claude", config.claudeModel, prompt, cwd, moveNames);
     if ("reaction" in answer) {
       saveReaction(answer.reaction, "turn", agy ? "gemini" : "claude", answer.move, answer.mood);
+      if (answer.mood) feelMood(stateDir, answer.mood, now());
       return answer.reaction;
     }
     error = answer.error;

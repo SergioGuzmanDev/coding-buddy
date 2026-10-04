@@ -231,6 +231,25 @@ describe("getStatusFrames", () => {
     for (const [name, mark] of Object.entries(cuedMarks)) expect(moveSequences![name].some((i) => frames[i].includes(mark)), name).toBe(true);
   });
 
+  test("a mood's loop plays the moves it favors in about half its slots, cued ones among them, and no other cued move", () => {
+    let calls = 0;
+    const evenly = () => ((calls++ % 40) + 0.5) / 40;
+    const { moodSequences, moveSequences } = getStatusFrames(octopus, evenly);
+    const slotMoves = (sequence: number[]) => Array.from({ length: sequence.length / 30 }, (_, slot) => {
+      const action = sequence.slice(slot * 30 + 15, slot * 30 + 30);
+      return Object.entries(moveSequences!).find(([, played]) => played.every((frame, i) => action[i] === frame))![0];
+    });
+    const cuedNames = cued.map((move) => move.name);
+
+    expect(Object.keys(moodSequences!).sort()).toEqual(Object.keys(STATUS_MOODS).sort());
+    for (const [mood, { favors }] of Object.entries(STATUS_MOODS)) {
+      const played = slotMoves(moodSequences![mood]);
+      expect(played.filter((move) => favors.includes(move)).length / played.length, mood).toBeGreaterThanOrEqual(0.4);
+      expect(played.some((move) => cuedNames.includes(move)), mood).toBe(true);
+      expect(played.filter((move) => cuedNames.includes(move) && !favors.includes(move)), mood).toEqual([]);
+    }
+  });
+
   test("a tired octopus sleeps or yawns in at least half of its moves, a rested one far less", () => {
     let calls = 0;
     const evenly = () => ((calls++ % 40) + 0.5) / 40;

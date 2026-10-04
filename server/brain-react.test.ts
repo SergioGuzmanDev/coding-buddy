@@ -159,6 +159,22 @@ describe("brain-react with brain agy", () => {
     expect(invented.mood).toBeUndefined();
   });
 
+  test("each mood it answers with adds to the mood it has been in lately, which the next prompt tells it", () => {
+    saveCompanion({ ...companion, bones: { ...companion.bones, species: "octopus" } });
+    writeFileSync(join(root, "out.json"), JSON.stringify({ response: "tap angry\n*tamborilea* otra vez lo mismo" }));
+    const bin = fakeCli(`cat "${root}/out.json"`);
+    const prompt = () => readFileSync(join(root, "args.log"), "utf8");
+
+    reactWithBrain("reply", "ask", { bin });
+    expect(prompt()).not.toContain("Lately you have been feeling");
+    reactWithBrain("reply", "ask", { bin });
+    expect(prompt()).not.toContain("Lately you have been feeling");
+    reactWithBrain("reply", "ask", { bin });
+
+    expect(prompt()).toContain("Lately you have been feeling angry.");
+    expect(JSON.parse(readFileSync(join(stateDir, "background-mood.json"), "utf8")).mood).toBe("angry");
+  });
+
   test("asks for a bubble of 3 or 4 short lines and keeps whatever comes back whole", () => {
     saveCompanion({ ...companion, bones: { ...companion.bones, species: "octopus" } });
     const first = `*sorbe su café* ${"muy bien visto, ".repeat(12).trim()}`;

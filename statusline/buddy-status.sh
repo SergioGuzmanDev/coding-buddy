@@ -65,7 +65,8 @@ if [ -n "${ITERM_SESSION_ID:-}" ] && [ -f "$BUDDY_STATE_DIR/focused-session" ] \
         # Reprinting a render from before this focus would undo everything shown while focused.
         [ -f "$_render_cache" ] && rm -f "$_render_cache"
     elif [ "$_render_cache" -nt "$CONFIG_FILE" ] && [ "$_render_cache" -nt "$REACTION_FILE" ] \
-        && [ "$_render_cache" -nt "$BUDDY_STATE_DIR/.move_gate.$SID" ]; then
+        && [ "$_render_cache" -nt "$BUDDY_STATE_DIR/.move_gate.$SID" ] \
+        && [ "$_render_cache" -nt "$BUDDY_STATE_DIR/background-mood.json" ]; then
         IFS= read -r -d '' _rendered < "$_render_cache"
         printf '%s' "$_rendered"
         exit 0
@@ -100,16 +101,20 @@ _reaction_path="$REACTION_FILE"
 SHOWN_FILE="$BUDDY_STATE_DIR/.shown_reaction.$SID"
 _shown_path="$SHOWN_FILE"
 [ -f "$_shown_path" ] || _shown_path=/dev/null
+BACKGROUND_MOOD_FILE="$BUDDY_STATE_DIR/background-mood.json"
+_background_path="$BACKGROUND_MOOD_FILE"
+[ -f "$_background_path" ] || _background_path=/dev/null
 read_fields EPOCH_NOW MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT LEVEL MOOD \
     TRANSCRIPT CONTEXT_PCT USAGE_5H_PCT \
     _cfg_theme _cfg_animate _color _bubble_color _cfg_hide_rarity _custom _cfg_inline _cfg_expanded \
     _cfg_click _ttl _bw _bm _wa _density _cfg_slim SUBSTATUS_COMMAND SUBSTATUS_REFRESH_SECONDS \
-    REACTION TS REACTION_MOVE REACTION_MOOD SHOWN_REACTION SHOWN_TS SHOWN_MOVE SHOWN_MOOD \
+    REACTION TS REACTION_MOVE REACTION_MOOD SHOWN_REACTION SHOWN_TS SHOWN_MOVE SHOWN_MOOD BG_MOOD BG_UNTIL \
     < <(jq -j --arg input "$BUDDY_STATUSLINE_INPUT" --rawfile xp "$_xp_file" \
-        --rawfile config "$_config_path" --rawfile reaction "$_reaction_path" --rawfile shown "$_shown_path" '
+        --rawfile config "$_config_path" --rawfile reaction "$_reaction_path" --rawfile shown "$_shown_path" \
+        --rawfile background "$_background_path" '
     def pct: if type == "number" then floor else 0 end;
     def object($raw): (try ($raw | fromjson) catch null) | if type == "object" then . else null end;
-    object($config) as $c | object($reaction) as $r | object($shown) as $s
+    object($config) as $c | object($reaction) as $r | object($shown) as $s | object($background) as $bg
     | (now | floor), (.muted // false), (.name // ""), (.rarity // "common"), (.stars // ""), (.shiny // false),
     (.achievement // ""), (if has("achievementAt") then (.achievementAt // 0) else "absent" end),
     ((try ($xp | fromjson | .level) catch null) // .level // 1), (.mood // "focused"),
@@ -121,7 +126,8 @@ read_fields EPOCH_NOW MUTED NAME RARITY STARS SHINY ACHIEVEMENT ACHIEVEMENT_AT L
     ($c.bubbleWidth // 44), ($c.bubbleMargin // 8), ($c.statuslineWidthAdjust // 0), ($c.statuslineDensity // "auto"),
     ($c.slim // false), ($c.subStatusCommand // ""), ($c.subStatusRefreshSeconds // ""),
     ($r.reaction // ""), ($r.timestamp // 0), ($r.move // ""), ($r.mood // ""),
-    ($s.reaction // ""), ($s.timestamp // 0), ($s.move // ""), ($s.mood // "")
+    ($s.reaction // ""), ($s.timestamp // 0), ($s.move // ""), ($s.mood // ""),
+    ($bg.mood // ""), ($bg.until // 0)
     | tostring, "\u0000"' "$STATE" 2>/dev/null)
 [ "$MUTED" = "true" ] && exit 0
 [ -z "$NAME" ] && exit 0
@@ -548,12 +554,17 @@ _old_signals=""
 [ -f "$BUDDY_STATE_DIR/.signals.$SID" ] && IFS= read -r _old_signals < "$BUDDY_STATE_DIR/.signals.$SID"
 [ "$_signals" = "$_old_signals" ] || printf '%s\n' "$_signals" > "$BUDDY_STATE_DIR/.signals.$SID"
 # The transcript grows with every message and tool call, so its age is how long the conversation has been quiet.
+# The mood the buddy has been in lately, shared by every tab; server/background-mood.ts sets when it fades.
+BACKGROUND_MOOD=""
+[ -n "$BG_MOOD" ] && [[ "$BG_UNTIL" =~ ^[0-9]+$ ]] && [ $(( BG_UNTIL / 1000 )) -gt "$NOW" ] && BACKGROUND_MOOD="$BG_MOOD"
 MOVE=pool
 [ -f "$TRANSCRIPT" ] && _substatus_mtime "$TRANSCRIPT"
 if [ -f "$TRANSCRIPT" ] && [ $(( NOW - SUBSTATUS_MTIME )) -ge "$ASLEEP_AFTER_IDLE_SECONDS" ]; then
     MOVE=idle
 elif [ "$TIRED" = true ]; then
     MOVE=tired
+elif [ -n "$BACKGROUND_MOOD" ]; then
+    MOVE=mood
 fi
 # A frozen status line would keep the move's first frame, so only an animated one acts it out.
 # The move and its mood color count from the same second, so both wait for focus together; the color outlasts the move.
@@ -578,7 +589,8 @@ SWEAT_DRAWN=false
 # after it; a first play holds them all off. The loop rests between moves, so a rest since the click marks a new one.
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
     --argjson sweat "$SWEAT_DRAWN" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
-    --argjson since_reaction "$SINCE_REACTION" --argjson since_mood "$SINCE_MOOD" --argjson replay "$REPLAY" '
+    --argjson since_reaction "$SINCE_REACTION" --argjson since_mood "$SINCE_MOOD" --argjson replay "$REPLAY" \
+    --arg background_mood "$BACKGROUND_MOOD" '
     def at($sequence; $t): $sequence[$t % ($sequence | length)];
     [.moveSequences[]?[]] as $move_frames
     | def moving: IN($move_frames[]);
@@ -588,6 +600,7 @@ FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --
      else ($sweat_set.frames // .frames) end) as $set
     | (if $move == "idle" and (.idleSequence | length) > 0 then .idleSequence
        elif $move == "tired" and (.tiredSequence | length) > 0 then .tiredSequence
+       elif $move == "mood" and (.moodSequences[$background_mood] | length) > 0 then .moodSequences[$background_mood]
        else .frameSequence end) as $loop
     | at($loop; $now) as $scheduled
     | ($replay and ($scheduled | moving)
@@ -596,7 +609,8 @@ FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --
            then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
        else $scheduled end) as $idx
     | ((.moodColors[$reaction_mood] // []) as $mood
-       | if $since_mood >= 0 and ($mood | length) > 0 then $mood[($since_mood / 2 | floor) % ($mood | length)] else "" end) as $mood_color
+       | if $since_mood >= 0 and ($mood | length) > 0 then $mood[($since_mood / 2 | floor) % ($mood | length)]
+         else (.moodColors[$background_mood] // [""])[0] end) as $mood_color
     | ((($set[0] // .frames[0] // "") | split("\n")[0] | test("^\\s*$")) | if . then "trim" else "keep" end)
       + " " + $mood_color + "\n" + (($set[$idx] // .frames[$idx]) // "")
 ' "$STATE" 2>/dev/null)

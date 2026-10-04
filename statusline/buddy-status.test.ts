@@ -744,6 +744,40 @@ describe("buddy sub-status cache", () => {
       expect(at(0, 39.9)).toContain("art-rest");
     });
 
+    test("paints the buddy with the mood it has been in lately until it fades, a reaction's own mood going on top", () => {
+      const { configDir, stateDir } = fixture({ moodColors: { angry: ["#FF0000"], happy: ["#00FF00"] } });
+      const red = "\x1b[38;2;255;0;0m";
+      const green = "\x1b[38;2;0;255;0m";
+      writeFileSync(join(stateDir, "background-mood.json"), JSON.stringify({ scores: { angry: 3 }, at: 0, mood: "angry", until: (now + 600) * 1000 }));
+      const at = (seconds: number) => render(configDir, {}, { BUDDY_FAKE_NOW: String(now + seconds) });
+      const reacted = (secondsAgo: number) => writeFileSync(join(stateDir, "reaction.default.json"),
+        JSON.stringify({ reaction: "*sonríe*", timestamp: (now - secondsAgo) * 1000, mood: "happy" }));
+
+      expect(at(0)).toContain(`${red}  art-rest`);
+      expect(at(599)).toContain(red);
+      expect(at(600)).not.toContain(red);
+      reacted(10);
+      expect(at(0)).toContain(`${green}  art-rest`);
+      reacted(120);
+      expect(at(0)).toContain(`${red}  art-rest`);
+    });
+
+    test("an unfocused tab, which does not animate, shows the mood it has been in lately too", () => {
+      const { configDir, stateDir } = fixture({ moodColors: { angry: ["#FF0000"] } }, { animate: "focused" });
+      writeFileSync(join(stateDir, "focused-session"), "AAA");
+      writeFileSync(join(stateDir, "background-mood.json"), JSON.stringify({ scores: { angry: 3 }, at: 0, mood: "angry", until: (now + 600) * 1000 }));
+
+      expect(render(configDir, {}, { ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("\x1b[38;2;255;0;0m  art-rest");
+    });
+
+    test("plays the loop of the mood it has been in lately, and the plain loop once it fades", () => {
+      const { configDir, stateDir } = fixture({ moodSequences: { angry: [3] } });
+      writeFileSync(join(stateDir, "background-mood.json"), JSON.stringify({ scores: { angry: 3 }, at: 0, mood: "angry", until: (now + 60) * 1000 }));
+
+      expect(render(configDir, {}, { BUDDY_FAKE_NOW: String(now) })).toContain("art-cheer");
+      expect(render(configDir, {}, { BUDDY_FAKE_NOW: String(now + 60) })).toContain("art-rest");
+    });
+
     test("a frozen status line keeps the drop while sweating", () => {
       const { configDir } = fixture({ sweat: { frames: ["  art-sweat"] } }, { animate: false });
 
@@ -1247,6 +1281,10 @@ describe("buddy sub-status cache", () => {
     expect(tick(3)).not.toContain("FROM-CACHE");
 
     age(configFile, 100);
+    cached();
+    writeFileSync(join(stateDir, "background-mood.json"), JSON.stringify({ scores: {}, at: 0, mood: "", until: 0 }));
+    expect(tick(4)).not.toContain("FROM-CACHE");
+
     cached();
     focus("BBB");
     tick(4);
