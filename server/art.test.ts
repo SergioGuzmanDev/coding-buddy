@@ -269,21 +269,27 @@ describe("getStatusFrames", () => {
     const held = (texts: string[]) => texts.flatMap((text) => [...text.matchAll(/\x01([^\x02]*)\x02/g)].map((m) => unmarked(m[1])));
     const objects = [...held(frames), ...held(minimalFrames)];
 
-    for (const object of ["===*", "___u", "c[_]", "<><", "o=o", "|#|", "|_|", "Y", "[]-[]", "|~", "%%%", "d", "b", "0", "x"]) {
+    for (const object of ["===*", "___u", "c[_]", "<><", "o=o", "|#|", "|_|", "Y", "[]-[]", "|", "%%%", "d", "b", "0", "x"]) {
       expect(objects.some((held) => held.includes(object)), object).toBe(true);
     }
     for (const body of ["(", ")", ".----.", "______", "/\\/\\", "@"]) expect(objects.filter((held) => held.includes(body)), body).toEqual([]);
-    for (const text of [...frames, ...minimalFrames]) expect(text.replace(/\x01[^\x02]*\x02/g, ""), JSON.stringify(text)).not.toMatch(/[\x01\x02]/);
+    for (const text of [...frames, ...minimalFrames]) {
+      expect(text.replace(/\x01[^\x02]*\x02/g, ""), JSON.stringify(text)).not.toMatch(/[\x01\x02]/);
+      expect(text, "a color tag with no color, or a stray mark").not.toMatch(/\{\w+\}|[«»]/);
+    }
   });
 
-  test("the cigarette's ember glows red and the pipe is wood brown, in the frames and the one-row faces", () => {
+  test("objects and some symbols carry their own colors: a red ember, a wooden pipe, a pink heart, sky-blue z's", () => {
     const { frames, minimalFrames } = markedStatusFrames(octopus);
-    const ember = "\x1b[38;2;255;69;0m";
-    const wood = "\x1b[38;2;160;82;45m";
+    const sgr = (rgb: string) => `\x1b[38;2;${rgb}m`;
 
     for (const texts of [frames, minimalFrames]) {
-      expect(texts.some((text) => text.includes(`===${ember}*\x02`) || text.includes(`${ember}*\x02\x01===`))).toBe(true);
-      expect(texts.some((text) => text.includes(`${wood}___u\x02`) || text.includes(`${wood}u___\x02`))).toBe(true);
+      const drawn = (text: string) => expect(texts.some((t) => t.includes(text)), JSON.stringify(text)).toBe(true);
+      drawn(`${sgr("255;69;0")}*\x02`);
+      drawn(`${sgr("160;82;45")}${texts === frames ? "___u" : "u___"}\x02`);
+      drawn(`${sgr("255;95;135")}<3\x02`);
+      drawn(`${sgr("93;173;226")}z`);
+      drawn(`${sgr("255;140;0")}<><\x02`);
     }
   });
 
