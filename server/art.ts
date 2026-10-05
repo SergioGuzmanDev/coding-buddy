@@ -784,16 +784,18 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
 // (statusline/buddy-status.sh), its colors taking turns every two ticks. A mood the buddy has been in lately
 // (server/background-mood.ts) shows its first color, steady, and makes the moves it favors come up more often,
 // the cued ones among them too: the mood is their reason.
-export const STATUS_MOODS: Record<string, { feels: string; colors: string[]; favors: string[] }> = {
-  angry: { feels: "angry", colors: ["#FF5555"], favors: ["tap", "dumbbell", "cigarette", "fume", "tableflip", "headshake"] },
+// `looks` names the colors for /buddy, whose card shows no terminal color.
+export const STATUS_MOODS: Record<string, { feels: string; colors: string[]; looks: string; favors: string[] }> = {
+  angry: { feels: "angry", colors: ["#FF5555"], looks: "🟥 red", favors: ["tap", "dumbbell", "cigarette", "fume", "tableflip", "headshake"] },
   excited: {
     feels: "thrilled",
     colors: ["#FF8C00", "#FFDC00", "#32D232", "#3278FF", "#6432DC", "#B432DC", "#FF3232"],
+    looks: "🌈 rainbow, then 🟧 orange while it lingers",
     favors: ["jump", "dance", "yoyo", "celebrate", "clap"],
   },
-  happy: { feels: "pleased", colors: ["#FFD75F"], favors: ["dance", "music", "wave", "nod", "wink"] },
-  embarrassed: { feels: "embarrassed", colors: ["#FF87D7"], favors: ["camouflage", "peek", "blush", "facepalm"] },
-  sad: { feels: "down", colors: ["#5FAFFF"], favors: ["sleep", "bubbles", "meditate", "cry"] },
+  happy: { feels: "pleased", colors: ["#FFD75F"], looks: "🟨 yellow", favors: ["dance", "music", "wave", "nod", "wink"] },
+  embarrassed: { feels: "embarrassed", colors: ["#FF87D7"], looks: "🩷 pink", favors: ["camouflage", "peek", "blush", "facepalm"] },
+  sad: { feels: "down", colors: ["#5FAFFF"], looks: "🟦 blue", favors: ["sleep", "bubbles", "meditate", "cry"] },
 };
 // About half the slots of a mood's loop go to the moves it favors.
 const FAVORED_WEIGHT = 4;

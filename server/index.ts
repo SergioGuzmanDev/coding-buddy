@@ -57,7 +57,7 @@ import {
 } from "./path";
 import { getReaction } from "../core/reactions.ts"
 import { renderCompanionCardMarkdown } from "./art";
-import { soothe } from "./background-mood";
+import { describeMoods, soothe } from "./background-mood";
 import {
   incrementEvent, checkAndAward, trackActiveDay,
   renderAchievementsCardMarkdown,
@@ -184,7 +184,7 @@ server.tool(
     incrementEvent("shows", 1);
     checkAndAward(activeSlot());
 
-    return { content: [{ type: "text", text: card }] };
+    return { content: [{ type: "text", text: `${card}\n\n${describeMoods(buddyStateDir())}` }] };
   },
 );
 

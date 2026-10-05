@@ -70,3 +70,25 @@ export function soothe(stateDir: string, now = Date.now()): BackgroundMood {
   scores.happy = (scores.happy ?? 0) + 1;
   return settle(stateDir, scores, now);
 }
+
+/** The /buddy card's mood section: the mood it is in lately, and the color of each one. */
+export function describeMoods(stateDir: string, now = Date.now()): string {
+  const state = readBackgroundMood(stateDir);
+  const mood = state.until > now ? state.mood : "";
+  const until = new Date(state.until).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const lines = [
+    "### Mood",
+    "",
+    mood
+      ? `**Lately:** ${mood}, ${STATUS_MOODS[mood].looks}, until about ${until} unless something changes it`
+      : "**Lately:** calm, in its own color",
+    "",
+    "| Mood | Color |",
+    "| --- | --- |",
+    ...Object.entries(STATUS_MOODS).map(([name, { looks }]) => `| ${name} | ${looks} |`),
+    "| calm | its own color |",
+    "",
+    "A reaction's mood shows for a moment; a few alike in a row set the mood it stays in for a while. `/buddy pet` cheers it up.",
+  ];
+  return lines.join("\n");
+}

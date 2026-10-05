@@ -4,7 +4,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { currentBackgroundMood, feelMood, HALF_LIFE_MS, readBackgroundMood, soothe } from "./background-mood.ts";
+import { STATUS_MOODS } from "./art.ts";
+import { currentBackgroundMood, describeMoods, feelMood, HALF_LIFE_MS, readBackgroundMood, soothe } from "./background-mood.ts";
 
 const minute = 60_000;
 let stateDir: string;
@@ -55,12 +56,24 @@ describe("background mood", () => {
     expect(currentBackgroundMood(stateDir, 0)).toBe("happy");
   });
 
+  test("the /buddy card tells the mood it is in lately and the color of every mood", () => {
+    expect(describeMoods(stateDir, 0)).toContain("**Lately:** calm, in its own color");
+
+    feelMood(stateDir, "angry", 0);
+    feelMood(stateDir, "angry", 0);
+    const angry = describeMoods(stateDir, 0);
+    expect(angry).toContain("**Lately:** angry, 🟥 red, until about ");
+    for (const [mood, { looks }] of Object.entries(STATUS_MOODS)) expect(angry).toContain(`| ${mood} | ${looks} |`);
+    expect(angry).toContain("| calm | its own color |");
+    expect(describeMoods(stateDir, 10 * HALF_LIFE_MS)).toContain("**Lately:** calm");
+  });
+
   test("ignores a feeling it has no color for", () => {
     expect(feelMood(stateDir, "furious", 0)).toBeUndefined();
     expect(readBackgroundMood(stateDir).scores).toEqual({});
   });
 
-  test("the buddy_pet tool soothes it", async () => {
+  test("the buddy_pet tool soothes it, and buddy_show tells the mood", async () => {
     const configDir = mkdtempSync(join(tmpdir(), "coding-buddy-pet-"));
     const petStateDir = join(configDir, "buddy-state");
     mkdirSync(petStateDir, { recursive: true });
@@ -77,6 +90,10 @@ describe("background mood", () => {
       const scores = JSON.parse(readFileSync(join(petStateDir, "background-mood.json"), "utf8")).scores;
       expect(scores.angry).toBeLessThan(1.1);
       expect(scores.happy).toBeGreaterThan(0.9);
+      const shown = await client.callTool({ name: "buddy_show", arguments: {} });
+      const text = (shown.content as { type: string; text: string }[])[0].text;
+      expect(text).toContain("### Mood");
+      expect(text).toContain("**Lately:** calm");
     } finally {
       await client.close();
       rmSync(configDir, { force: true, recursive: true });
