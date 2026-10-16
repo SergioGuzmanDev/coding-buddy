@@ -30,24 +30,32 @@ async def focused_session(connection):
 
 async def main(connection):
     title = None
+    written = None
     focus_changed = True
     # The monitor opens before the first read so a focus change in between is not lost.
     async with iterm2.FocusMonitor(connection) as monitor:
         while True:
-            session = await focused_session(connection)
-            if session:
-                # The status line compares this file's mtime against its gates, so only a focus change rewrites it.
-                if focus_changed:
-                    remember(FOCUS_FILE, session.session_id)
-                current = await session.async_get_variable("autoName") or ""
-                if current != title:
-                    remember(TITLE_FILE, current)
-                    title = current
+            # A tab can close between the focus change and these reads; dying here would freeze every tab's buddy.
+            try:
+                session = await focused_session(connection)
+                if session:
+                    # The status line compares this file's mtime against its gates, so a poll rewrites it only
+                    # when the focus moved without an update, as when the id written last was a closing tab.
+                    if focus_changed or session.session_id != written:
+                        remember(FOCUS_FILE, session.session_id)
+                        written = session.session_id
+                        focus_changed = False
+                    current = await session.async_get_variable("autoName") or ""
+                    if current != title:
+                        remember(TITLE_FILE, current)
+                        title = current
+            except iterm2.RPCException:
+                pass
             try:
                 await asyncio.wait_for(monitor.async_get_next_update(), TITLE_POLL_SECONDS)
                 focus_changed = True
             except asyncio.TimeoutError:
-                focus_changed = False
+                pass
 
 
 iterm2.run_forever(main)
