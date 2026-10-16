@@ -718,6 +718,26 @@ describe("buddy sub-status cache", () => {
     expect(at("1", "")).not.toBe(at("2", ""));
   });
 
+  test("animate focused moves a background session only while the focused tab is titled with its name", () => {
+    const { configDir, stateDir } = createStatuslineFixture({ statuslineDensity: "full", animate: "focused" });
+    const status = JSON.parse(readFileSync(join(stateDir, "status.json"), "utf8"));
+    writeFileSync(join(stateDir, "status.json"), JSON.stringify({ ...status, frames: ["  art-A", "  art-B"], frameSequence: [0, 1] }));
+    writeFileSync(join(stateDir, "focused-session"), "AAA");
+    const sessionId = "61b90721-8970-4fb4-9db3-22ec2c847560";
+    mkdirSync(join(configDir, "jobs", "61b90721"), { recursive: true });
+    writeFileSync(join(configDir, "jobs", "61b90721", "state.json"), JSON.stringify({ sessionId, name: "ivan ⑂ curl" }));
+    const at = (now: string) =>
+      runStatusline(configDir, "{}\n", "80", {
+        BUDDY_FAKE_NOW: now, ITERM_SESSION_ID: "", CLAUDE_CODE_SESSION_ID: sessionId,
+      }).stdout.toString();
+
+    writeFileSync(join(stateDir, "focused-title"), "✳ ivan ⑂ curl");
+    expect(at("1")).not.toBe(at("2"));
+
+    writeFileSync(join(stateDir, "focused-title"), "✳ ivan");
+    expect(at("1")).toBe(at("2"));
+  });
+
   describe("moves driven by the session", () => {
     const now = 1_700_000_000;
     const fixture = (status: Record<string, unknown>, config: Record<string, unknown> = {}) => {

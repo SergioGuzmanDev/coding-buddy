@@ -57,6 +57,22 @@ _config_text=""
 _focused=""
 [ -f "$CONFIG_FILE" ] && IFS= read -r -d '' _config_text < "$CONFIG_FILE"
 [ -f "$BUDDY_STATE_DIR/focused-session" ] && IFS= read -r _focused < "$BUDDY_STATE_DIR/focused-session"
+# A daemon-hosted background session gets no ITERM_SESSION_ID: it is the focused tab when that tab's title is its name.
+if [ -z "${ITERM_SESSION_ID:-}" ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] \
+    && [ -f "$BUDDY_STATE_DIR/focused-session" ] && [ -f "$BUDDY_STATE_DIR/focused-title" ]; then
+    _job_name=$(jq -r --arg sid "$CLAUDE_CODE_SESSION_ID" 'select(.sessionId == $sid) | .name // empty' \
+        "$CLAUDE_CFG_DIR/jobs/${CLAUDE_CODE_SESSION_ID:0:8}/state.json" 2>/dev/null)
+    if [ -n "$_job_name" ]; then
+        _focused_title=""
+        IFS= read -r _focused_title < "$BUDDY_STATE_DIR/focused-title"
+        # The title usually starts with Claude Code's state glyph: ✳ when idle, a braille spinner while working.
+        if [ "$_focused_title" = "$_job_name" ] || [ "${_focused_title#* }" = "$_job_name" ]; then
+            ITERM_SESSION_ID="background:$_focused"
+        else
+            ITERM_SESSION_ID="background:$SID"
+        fi
+    fi
+fi
 _animate_focused_re='"animate": *"focused"'
 if [ -n "${ITERM_SESSION_ID:-}" ] && [ -f "$BUDDY_STATE_DIR/focused-session" ] \
     && [[ "$_config_text" =~ $_animate_focused_re ]]; then
