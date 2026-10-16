@@ -41,13 +41,16 @@ function fakeCli(body: string): string {
 /** agy that reports a spent quota, as it logs it, unless it runs under the given HOME. */
 function spentUnlessHome(answeringHome: string): string {
   return `
-    log=""; prev=""; for a in "$@"; do [ "$prev" = "--log-file" ] && log="$a"; prev="$a"; done
+    ${LOG_ARG}
     if [ "$HOME" != "${answeringHome}" ]; then
       echo 'attempt 1 failed (RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 2h0m5s.)' > "$log"
       echo '{"error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached."}'; exit 1
     fi
     cat "${root}/out.json"`;
 }
+
+/** Sets $log to the path agy was given with --log-file. */
+const LOG_ARG = 'log=""; prev=""; for a in "$@"; do [ "$prev" = "--log-file" ] && log="$a"; prev="$a"; done';
 
 function callCount(): number {
   try {
@@ -371,15 +374,39 @@ exit 0
     expect(bubble().reaction).toBe("Sleeping, brain not responding. invalid model selection: model flash is not recognized");
   });
 
-  test("points agy's log at one file in the state dir, replaced on every call", () => {
+  test("keeps only the last call's agy log, in one file in the state dir", () => {
     const logFile = join(stateDir, ".gemini_last.log");
     writeFileSync(logFile, "PREVIOUS-RUN");
     writeFileSync(join(root, "out.json"), JSON.stringify({ response: "*quacks*" }));
+    const bin = fakeCli(`${LOG_ARG}\necho THIS-RUN > "$log"\ncat "${root}/out.json"`);
 
-    reactWithBrain("reply", "ask", { bin: fakeCli(`cat "${root}/out.json"`) });
+    reactWithBrain("reply", "ask", { bin });
 
-    expect(readFileSync(join(root, "args.log"), "utf8")).toContain(`--log-file\n${logFile}\n`);
-    expect(existsSync(logFile)).toBe(false);
+    expect(readFileSync(logFile, "utf8")).toBe("THIS-RUN\n");
+    expect(readdirSync(stateDir).filter((name) => name.startsWith(".gemini_last."))).toEqual([".gemini_last.log"]);
+  });
+
+  test("reads its own log for a spent quota while another tab's call runs", async () => {
+    const bin = join(root, "bin", "agy");
+    writeFileSync(bin, `#!/bin/sh
+${LOG_ARG}
+case "$*" in
+  *TAB-B*) echo "no quota here" > "$log"; echo '{"response":"*quacks*"}'; touch "${root}/b-done" ;;
+  *) echo 'RESOURCE_EXHAUSTED: Individual quota reached. Resets in 1h0m0s.' > "$log"; touch "${root}/a-started"
+     i=0; while [ ! -e "${root}/b-done" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+     echo '{"error":"RESOURCE_EXHAUSTED (code 429): Individual quota reached."}'; exit 1 ;;
+esac
+`);
+    chmodSync(bin, 0o755);
+    const brain = (message: string) =>
+      Bun.spawn([process.execPath, "run", join(import.meta.dir, "brain-react.ts"), message, "ask"], { env: process.env });
+
+    const tabA = brain("TAB-A reply");
+    for (let i = 0; i < 100 && !existsSync(join(root, "a-started")); i++) await Bun.sleep(50);
+    await brain("TAB-B reply").exited;
+    await tabA.exited;
+
+    expect(existsSync(join(stateDir, ".gemini_quota.json"))).toBe(true);
   });
 
   test("deletes the conversation agy stored for the call and nothing else", () => {

@@ -7,7 +7,7 @@
 
 import { Database } from "bun:sqlite";
 import { spawnSync } from "child_process";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, writeFileSync } from "fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import type { Companion } from "../core/engine.ts";
@@ -375,7 +375,9 @@ function recentFailure(path: string, now: number): string | undefined {
 /** Asks the signed-in agy account, then each other one in turn while the ones before it are out of quota. */
 function askAgy(runtime: BrainReactRuntime, stateDir: string, now: () => number, prompt: string, cwd: string, moveNames: string[]): BrainAnswer {
   // agy keeps a ~25 KB log of every run in its own log directory and never deletes it; only the last one is kept here.
-  const logFile = join(stateDir, ".gemini_last.log");
+  const lastLog = join(stateDir, ".gemini_last.log");
+  // Each run writes its own file, so another tab's run cannot delete it before its quota is read.
+  const logFile = join(stateDir, `.gemini_last.${process.pid}.log`);
   const model = loadConfig().geminiModel;
   const signedIn: GeminiAccount = {
     agyDir: runtime.agyDir ?? join(homedir(), ".gemini", "antigravity-cli"),
@@ -383,15 +385,23 @@ function askAgy(runtime: BrainReactRuntime, stateDir: string, now: () => number,
   };
   const accounts = [signedIn, ...fallbackAccounts(stateDir)];
   let answer: BrainAnswer | undefined;
-  for (const account of accounts) {
-    if (spentUntil(account.quotaFile) > now()) continue;
-    rmSync(logFile, { force: true });
-    account.prepare?.();
-    answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
-    if (answer.conversationId) forgetConversation(answer.conversationId, account.agyDir);
-    const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
-    if (!resetsIn) return answer;
-    writeFileSync(account.quotaFile, JSON.stringify({ until: now() + resetsIn }));
+  try {
+    for (const account of accounts) {
+      if (spentUntil(account.quotaFile) > now()) continue;
+      rmSync(logFile, { force: true });
+      account.prepare?.();
+      answer = askGemini(runtime.bin ?? "agy", model, prompt, cwd, moveNames, logFile, account.env);
+      if (answer.conversationId) forgetConversation(answer.conversationId, account.agyDir);
+      const resetsIn = "error" in answer ? quotaResetsInMs(logFile) : undefined;
+      if (!resetsIn) return answer;
+      writeFileSync(account.quotaFile, JSON.stringify({ until: now() + resetsIn }));
+    }
+  } finally {
+    try {
+      renameSync(logFile, lastLog);
+    } catch {
+      // agy never started, so this run has no log to keep.
+    }
   }
   if (answer) return answer;
   const back = new Date(Math.min(...accounts.map((account) => spentUntil(account.quotaFile))));
