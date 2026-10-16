@@ -444,22 +444,22 @@ if [ -n "$ACHIEVEMENT" ] && [ "$ACHIEVEMENT" != "null" ]; then
     [ "$ACH_FRESH" -eq 1 ] && BUBBLE=$'\xf0\x9f\x8f\x86'" $ACHIEVEMENT"
 fi
 
-REACTION_MOVE_SECONDS=30
 MOOD_SECONDS=120
 MOVE_AFTER_FOCUS_SECONDS=3
 BUBBLE_FOCUSED_SECONDS=15
 READ_ON_SECONDS=5
-# Under animate "focused" in iTerm2 a reaction waits to be looked at: its bubble, move and mood last
-# BUBBLE_FOCUSED_SECONDS from 3 s of focus, then the bubble closes, reopenable until the next reaction.
-# One that arrives while the bubble before it is being read waits up to READ_ON_SECONDS behind it.
+# Under animate "focused" in iTerm2 a reaction waits to be looked at: its bubble closes BUBBLE_FOCUSED_SECONDS
+# after 3 s of focus, reopenable until the next reaction. One that arrives while the bubble before it is being
+# read waits up to READ_ON_SECONDS behind it.
 GATED=0
 [ "$_cfg_animate" = focused ] && [ -n "${ITERM_SESSION_ID:-}" ] && [ -f "$BUDDY_STATE_DIR/focused-session" ] \
     && [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [[ "$TS" =~ ^[0-9]+$ ]] && GATED=1
 
-# Sets _move_from to when the reaction's bubble, move and mood started counting BUBBLE_FOCUSED_SECONDS,
-# or -1 while it waits for MOVE_AFTER_FOCUS_SECONDS of focus. The gate file holds the reaction, the second
-# it counts from (focus start while waiting, window start once open, hold end while held) and the state;
-# bubble-click.sh writes it open. While held, a fourth line keeps when the bubble being read opened.
+# Sets _move_from to when the reaction's bubble started counting BUBBLE_FOCUSED_SECONDS, or -1 while it waits
+# for MOVE_AFTER_FOCUS_SECONDS of focus, and _play_from to when it starts or will start counting. The gate
+# file holds the reaction, the second it counts from (focus start while waiting, window start once open, hold
+# end while held) and the state; bubble-click.sh writes it open. While held, a fourth line keeps when the
+# bubble being read opened.
 # focused-session is rewritten on every focus change, so a copy newer than the gate file means focus went
 # away since the gate last recorded where it started. Only a focused session advances it.
 _reaction_gate() {
@@ -467,16 +467,15 @@ _reaction_gate() {
     local gate_ts="" gate_at="" gate_state="" gate_from="" since at state=wait hold_end="" read_from
     [ -f "$gate_file" ] && { IFS= read -r gate_ts; IFS= read -r gate_at; IFS= read -r gate_state; IFS= read -r gate_from; } < "$gate_file"
     case "$gate_at" in ''|*[!0-9]*) gate_ts="" ;; esac
-    _move_from=-1
-    if [ "$gate_ts" = "$TS" ] && { [ "$gate_state" = open ] || [ "$gate_state" = replay ]; }; then
-        _move_from=$gate_at
-        [ "$gate_state" = replay ] && REPLAY=true
+    _move_from=-1 _play_from=-1
+    if [ "$gate_ts" = "$TS" ] && [ "$gate_state" = open ]; then
+        _move_from=$gate_at _play_from=$gate_at
         return
     fi
     if [ "$gate_state" = hold ] && [[ "$gate_from" =~ ^[0-9]+$ ]]; then
         hold_end=$gate_at read_from=$gate_from
     elif [ "$ANIMATE" -eq 1 ] && [ "$gate_ts" != "$TS" ] && [ "$gate_ts" = "$SHOWN_TS" ] \
-        && { [ "$gate_state" = open ] || [ "$gate_state" = replay ]; } && ! [ "$focus_file" -nt "$REACTION_FILE" ]; then
+        && [ "$gate_state" = open ] && ! [ "$focus_file" -nt "$REACTION_FILE" ]; then
         read_from=$gate_at
         hold_end=$(( TS / 1000 + READ_ON_SECONDS ))
         [ "$hold_end" -le $(( gate_at + BUBBLE_FOCUSED_SECONDS )) ] || hold_end=$(( gate_at + BUBBLE_FOCUSED_SECONDS ))
@@ -485,7 +484,7 @@ _reaction_gate() {
         [ "$gate_ts $gate_at $gate_state $gate_from" = "$TS $hold_end hold $read_from" ] \
             || printf '%s\n%s\n%s\n%s\n' "$TS" "$hold_end" hold "$read_from" > "$gate_file"
         HOLDING=1
-        _move_from=$read_from
+        _move_from=$read_from _play_from=$read_from
         REACTION=$SHOWN_REACTION REACTION_MOVE=$SHOWN_MOVE REACTION_MOOD=$SHOWN_MOOD
         return
     fi
@@ -500,6 +499,7 @@ _reaction_gate() {
         since=$(( TS / 1000 ))
     fi
     at=$since
+    _play_from=$(( since + MOVE_AFTER_FOCUS_SECONDS ))
     if [ $(( NOW - since )) -ge "$MOVE_AFTER_FOCUS_SECONDS" ]; then
         state=open
         at=$(( since + MOVE_AFTER_FOCUS_SECONDS ))
@@ -510,10 +510,9 @@ _reaction_gate() {
 
 BUBBLE_CLOSED=0
 BUBBLE_COUNTDOWN=0
-REPLAY=false
 HOLDING=0
+FRESH=0
 if [ -n "$REACTION" ] && [ "$REACTION" != "null" ] && [ "$REACTION" != "" ]; then
-    FRESH=0
     if [ "$GATED" -eq 1 ]; then
         _reaction_gate
         FRESH=1
@@ -582,34 +581,27 @@ elif [ "$TIRED" = true ]; then
 elif [ -n "$BACKGROUND_MOOD" ]; then
     MOVE=mood
 fi
-# A frozen status line would keep the move's first frame, so only an animated one acts it out.
-# The move and its mood color count from the same second, so both wait for focus together; the color outlasts the move.
-SINCE_REACTION=-1
-SINCE_MOOD=-1
-_move_seconds=$REACTION_MOVE_SECONDS
-if [ "$GATED" -eq 1 ]; then
-    _move_seconds=$BUBBLE_FOCUSED_SECONDS
-elif [[ "$TS" =~ ^[0-9]+$ ]]; then
-    _move_from=$(( TS / 1000 ))
-else
-    _move_from=-1
+# A frozen status line would keep the move's first frame, so only an animated one acts it out, for as long as
+# its bubble shows; the mood color outlasts it. Both count from when the bubble starts counting, so a bubble
+# waiting for focus counts up to 0, which jq indexes from the move's end, and the move runs on without a jump.
+SINCE_REACTION=null
+SINCE_MOOD=null
+if [ "$GATED" -eq 0 ]; then
+    _play_from=-1
+    [[ "$TS" =~ ^[0-9]+$ ]] && _play_from=$(( TS / 1000 ))
 fi
-[ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOVE$REACTION_MOOD" ] && [ "$_move_from" -ge 0 ] \
-    && [ $(( NOW - _move_from )) -lt "$_move_seconds" ] && SINCE_REACTION=$(( NOW - _move_from ))
-[ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOOD" ] && [ "$_move_from" -ge 0 ] \
-    && [ $(( NOW - _move_from )) -lt "$MOOD_SECONDS" ] && SINCE_MOOD=$(( NOW - _move_from ))
+[ "$ANIMATE" -eq 1 ] && [ "$FRESH" -eq 1 ] && [ -n "$REACTION_MOVE" ] && [ "$_play_from" -ge 0 ] \
+    && SINCE_REACTION=$(( NOW - _play_from ))
+[ "$ANIMATE" -eq 1 ] && [ -n "$REACTION_MOOD" ] && [ "$_play_from" -ge 0 ] \
+    && [ $(( NOW - _play_from )) -lt "$MOOD_SECONDS" ] && SINCE_MOOD=$(( NOW - _play_from ))
 # The drop comes and goes while sweating. A frozen status line has no clock to blink by, so it keeps it.
 SWEAT_DRAWN=false
 [ "$SWEAT" = true ] && [ $(( (ANIMATE ? NOW : 0) % SWEAT_EVERY_SECONDS )) -lt "$SWEAT_SHOWN_SECONDS" ] && SWEAT_DRAWN=true
-# A reopened bubble cuts the move the loop is playing at the click, but yields to any move the loop starts
-# after it; a first play holds them all off. The loop rests between moves, so a rest since the click marks a new one.
 FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --arg move "$MOVE" \
     --argjson sweat "$SWEAT_DRAWN" --arg reaction_move "$REACTION_MOVE" --arg reaction_mood "$REACTION_MOOD" \
-    --argjson since_reaction "$SINCE_REACTION" --argjson since_mood "$SINCE_MOOD" --argjson replay "$REPLAY" \
+    --argjson since_reaction "$SINCE_REACTION" --argjson since_mood "$SINCE_MOOD" \
     --arg background_mood "$BACKGROUND_MOOD" '
     def at($sequence; $t): $sequence[$t % ($sequence | length)];
-    [.moveSequences[]?[]] as $move_frames
-    | def moving: IN($move_frames[]);
     (if $sweat then (.sweat // {}) else {} end) as $sweat_set
     | (if $tier == "compact" then ($sweat_set.compactFrames // .compactFrames? // .frames)
      elif $tier == "minimal" then ($sweat_set.minimalFrames // .minimalFrames? // .frames)
@@ -618,14 +610,11 @@ FRAME_OUT=$(jq -r --argjson now "$(( ANIMATE ? NOW : 0 ))" --arg tier "$TIER" --
        elif $move == "tired" and (.tiredSequence | length) > 0 then .tiredSequence
        elif $move == "mood" and (.moodSequences[$background_mood] | length) > 0 then .moodSequences[$background_mood]
        else .frameSequence end) as $loop
-    | at($loop; $now) as $scheduled
-    | ($replay and ($scheduled | moving)
-       and any(range($now - $since_reaction; $now) | at($loop; .); moving | not)) as $loop_cuts_replay
-    | (if $since_reaction >= 0 and (.moveSequences[$reaction_move] | length) > 0 and ($loop_cuts_replay | not)
-           then .moveSequences[$reaction_move][$since_reaction % (.moveSequences[$reaction_move] | length)]
-       else $scheduled end) as $idx
+    | (if $since_reaction != null and (.moveSequences[$reaction_move] | length) > 0
+           then at(.moveSequences[$reaction_move]; $since_reaction)
+       else at($loop; $now) end) as $idx
     | ((.moodColors[$reaction_mood] // []) as $mood
-       | if $since_mood >= 0 and ($mood | length) > 0 then $mood[($since_mood / 2 | floor) % ($mood | length)]
+       | if $since_mood != null and ($mood | length) > 0 then at($mood; $since_mood / 2 | floor)
          else (.moodColors[$background_mood] // [""])[0] end) as $mood_color
     | ((($set[0] // .frames[0] // "") | split("\n")[0] | test("^\\s*$")) | if . then "trim" else "keep" end)
       + " " + $mood_color + "\n" + (($set[$idx] // .frames[$idx]) // "")

@@ -860,18 +860,22 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, input)).toContain("art-tired");
     });
 
-    test("acts out the move the brain picked for 30 seconds after its reaction, if the move exists and it animates", () => {
-      const { configDir, stateDir } = fixture({ moveSequences: { coffee: [3] } });
+    test("acts out the move the brain picked while its bubble shows, if the move exists and it animates", () => {
+      const { configDir, stateDir } = fixture({ moveSequences: { coffee: [3] } }, { reactionTTL: 60 });
       // Expired reactions are swept by the real clock, so this test runs on it.
       const clock = Math.floor(Date.now() / 1000);
       const at = { BUDDY_FAKE_NOW: String(clock) };
       const reacted = (secondsAgo: number, move: string) => writeFileSync(join(stateDir, "reaction.default.json"),
         JSON.stringify({ reaction: "*sorbe*", timestamp: (clock - secondsAgo) * 1000, move }));
 
-      reacted(29, "coffee");
-      expect(render(configDir, {}, at)).toContain("art-cheer");
-      reacted(30, "coffee");
-      expect(render(configDir, {}, at)).toContain("art-rest");
+      reacted(45, "coffee");
+      const shown = render(configDir, {}, at);
+      expect(shown).toContain("*sorbe*");
+      expect(shown).toContain("art-cheer");
+      reacted(120, "coffee");
+      const gone = render(configDir, {}, at);
+      expect(gone).not.toContain("*sorbe*");
+      expect(gone).toContain("art-rest");
       reacted(5, "moonwalk");
       expect(render(configDir, {}, at)).toContain("art-rest");
 
@@ -881,7 +885,7 @@ describe("buddy sub-status cache", () => {
       expect(render(configDir, {}, { ...at, ITERM_SESSION_ID: "w0t1p0:BBB" })).toContain("art-rest");
     });
 
-    describe("under animate focused, the bubble and move last 15 seconds from 3 seconds of focus after the reaction, the mood 2 minutes", () => {
+    describe("under animate focused, the bubble lasts 15 seconds from 3 seconds of focus after the reaction, its move as long, the mood 2 minutes", () => {
       const clock = Math.floor(Date.now() / 1000);
       const red = "\x1b[38;2;255;0;0m";
       const reopenLink = /\x1b\]8;;coding-buddy:\/\/reopen\/default\x1b\\(?:\x1b\[2m)?Nimbus/;
@@ -905,7 +909,7 @@ describe("buddy sub-status cache", () => {
         return { ...made, reaction, focus, gate, cache, react, tick, touch, reopen };
       };
 
-      test("already focused when it arrives, all three start 3 seconds after the reaction, and the mood outlasts the other two", () => {
+      test("already focused when it arrives, the count starts 3 seconds after the reaction, the move and mood play through the wait without a jump, and the mood outlasts the bubble", () => {
         const { reaction, focus, react, tick, touch } = setup();
         react(1);
         touch(focus, -100);
@@ -913,8 +917,9 @@ describe("buddy sub-status cache", () => {
 
         const waiting = tick(0);
         expect(waiting).toContain("*sorbe*");
-        expect(waiting).toContain("art-rest");
-        expect(waiting).not.toContain(red);
+        expect(waiting).toContain("art-cheer");
+        expect(waiting).toContain(red);
+        expect(tick(1)).toContain("art-tired");
         const started = tick(2);
         expect(started).toContain("art-cheer");
         expect(started).toContain(red);
@@ -936,11 +941,15 @@ describe("buddy sub-status cache", () => {
         touch(reaction, -10);
         touch(focus, -5);
 
-        expect(tick(0)).toContain("art-rest");
+        const waiting = tick(0);
+        expect(waiting).toContain("*sorbe*");
+        expect(waiting).toContain("art-tired");
         touch(gate, -4);
-        expect(tick(2)).toContain("art-rest");
+        expect(tick(2)).toContain("art-tired");
         expect(Math.round(statSync(gate).mtimeMs / 1000)).toBe(clock - 4);
         expect(tick(3)).toContain("art-cheer");
+        expect(tick(17)).toContain("*sorbe*");
+        expect(tick(18)).not.toContain("*sorbe*");
       });
 
       test("focus going away restarts the count, but not a window already running", () => {
@@ -949,14 +958,16 @@ describe("buddy sub-status cache", () => {
         touch(reaction, -10);
         touch(focus, -5);
 
-        expect(tick(0)).toContain("art-rest");
+        expect(tick(0)).toContain("art-tired");
         touch(gate, -3);
         touch(focus, -2);
-        expect(tick(3)).toContain("art-rest");
+        expect(tick(3)).toContain("art-tired");
         expect(tick(6)).toContain("art-cheer");
 
         touch(focus, 100);
         expect(tick(7)).toContain("art-tired");
+        expect(tick(20)).toContain("*sorbe*");
+        expect(tick(21)).not.toContain("*sorbe*");
       });
 
       test("unseen, the bubble stays open in an unfocused tab however old, and never counts there", () => {
@@ -1068,20 +1079,23 @@ describe("buddy sub-status cache", () => {
         expect(tick(now + 1)).toContain("art-tired");
       });
 
-      test("a move the loop starts after the click plays over the replayed reaction", () => {
+      test("a reopened reaction holds off the moves the loop starts after the click, as long as its bubble shows", () => {
         const { gate, react, tick } = setup(
           { clickToExpand: true },
           { frameSequence: [2, 2, 0, 2], moveSequences: { coffee: [3, 1], stretch: [2] } },
         );
         react(100);
         const click = clock + 40 - ((clock + 40) % 4) + 1;
-        writeFileSync(gate, `${(clock - 100) * 1000}\n${click}\nreplay\n`);
+        writeFileSync(gate, `${(clock - 100) * 1000}\n${click}\nopen\n`);
 
         expect(tick(click - clock)).toContain("art-cheer");
         expect(tick(click - clock + 1)).toContain("art-tired");
-        expect(tick(click - clock + 2)).toContain("art-asleep");
-        expect(tick(click - clock + 4)).toContain("art-asleep");
+        expect(tick(click - clock + 2)).toContain("art-cheer");
         expect(tick(click - clock + 5)).toContain("art-tired");
+        expect(tick(click - clock + 14)).toContain("art-cheer");
+        const closed = tick(click - clock + 15);
+        expect(closed).not.toContain("*sorbe*");
+        expect(closed).toContain("art-asleep");
       });
 
       test("a new reaction during a replay waits for the replayed bubble to be read, then plays its own move", () => {
@@ -1218,7 +1232,7 @@ describe("buddy sub-status cache", () => {
         expect(readdirSync(join(stateDir, ".move_gate.a"))).toEqual([]);
 
         reopen();
-        expect(readFileSync(gate, "utf8")).toMatch(new RegExp(`^${(clock - 100) * 1000}\n\\d+\nreplay\n$`));
+        expect(readFileSync(gate, "utf8")).toMatch(new RegExp(`^${(clock - 100) * 1000}\n\\d+\nopen\n$`));
         reopen("coding-buddy://close/default");
         expect(readFileSync(gate, "utf8")).toBe(`${(clock - 100) * 1000}\n0\nopen\n`);
       });
