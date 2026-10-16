@@ -154,7 +154,7 @@ export function buildPrompt(
       ? [`Lately you have been feeling ${STATUS_MOODS[lately].feels}. It lingers in your tone, but this exchange may make you feel otherwise.`]
       : []),
     "",
-    "Write ONE in-character reaction to the latest exchange below. It must fit a small speech bubble: at most 3 short lines of up to 40 characters each.",
+    "Write ONE in-character reaction to the latest exchange below. It must fit a small speech bubble: 3 short lines, about 40 characters each.",
     "Point at something specific from it: a pitfall, a win, a risk, a pattern. Use the earlier conversation only to understand it.",
     "Use *asterisks* for physical actions. Write in the developer's language.",
     ...(moves.length
