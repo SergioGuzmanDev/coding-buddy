@@ -175,7 +175,7 @@ describe("brain-react with brain agy", () => {
     expect(JSON.parse(readFileSync(join(stateDir, "background-mood.json"), "utf8")).mood).toBe("angry");
   });
 
-  test("asks for a bubble of 3 or 4 short lines and keeps whatever comes back whole", () => {
+  test("asks for a bubble of at most 3 short lines and keeps whatever comes back whole", () => {
     saveCompanion({ ...companion, bones: { ...companion.bones, species: "octopus" } });
     const first = `*sorbe su café* ${"muy bien visto, ".repeat(12).trim()}`;
     const second = "y el refresh a dos segundos se respeta.";
@@ -184,7 +184,7 @@ describe("brain-react with brain agy", () => {
     reactWithBrain("reply", "ask", { bin: fakeCli(`cat "${root}/out.json"`) });
 
     expect(bubble().reaction).toBe(`${first} ${second}`);
-    expect(readFileSync(join(root, "args.log"), "utf8")).toContain("3 or 4 short lines, about 40 characters each");
+    expect(readFileSync(join(root, "args.log"), "utf8")).toContain("at most 3 short lines of up to 40 characters each");
   });
 
   test("tells Gemini the buddy is sweating or tired when the status line draws it that way", () => {
