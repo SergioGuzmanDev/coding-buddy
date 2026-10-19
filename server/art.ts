@@ -293,12 +293,12 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         name: "cigarette",
         does: "smokes a cigarette",
         frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«{paper}==={ember}*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«{paper}==={ember}*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} )   «{smoke}~»", "  (______)«{paper}==={ember}*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.    «{smoke}~»", "  ( {E}  {E} )  «{smoke}~»", "  (______)«{paper}==={ember}*»", "  \\/\\/\\/\\/  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«{white}==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«{white}==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )   «{smoke}~»", "  (______)«{white}==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    «{smoke}~»", "  ( {E}  {E} )  «{smoke}~»", "  (______)«{white}==={ember}*»", "  \\/\\/\\/\\/  "],
         ],
-        faces: [" «{ember}*»«{paper}===»~({E}{E})~", " «{ember}*»«{paper}===»~(--)~", "«{smoke}°»«{ember}*»«{paper}===»~({E}{E})~", "«{smoke}~»«{ember}*»«{paper}===»~({E}{E})~"],
+        faces: [" «{ember}*»«{white}===»~({E}{E})~", " «{ember}*»«{white}===»~(--)~", "«{smoke}°»«{ember}*»«{white}===»~({E}{E})~", "«{smoke}~»«{ember}*»«{white}===»~({E}{E})~"],
         sequence: SMOKE_SEQUENCE,
       },
       {
@@ -467,10 +467,10 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         does: "plays with a yo-yo",
         frames: [
           ["            ", "   .----.   ", "  ( {E}  {E} ) «{red}0»", "  (______)/  ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} ) «|»", "  (______)/«|» ", "  /\\/\\/\\/\\ «{red}0»"],
-          ["            ", "   .----.   ", "  ( {E}  {E} ) «|»", "  (______)/«{red}0» ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} ) «{white}|»", "  (______)/«{white}|» ", "  /\\/\\/\\/\\ «{red}0»"],
+          ["            ", "   .----.   ", "  ( {E}  {E} ) «{white}|»", "  (______)/«{red}0» ", "  /\\/\\/\\/\\  "],
         ],
-        faces: ["~({E}{E})~«{red}0»", "~({E}{E})~«--{red}0»", "~({E}{E})~«-{red}0»"],
+        faces: ["~({E}{E})~«{red}0»", "~({E}{E})~«{white}--{red}0»", "~({E}{E})~«{white}-{red}0»"],
         sequence: [0, 2, 1, 2, 0, 2, 1, 2, 0, 2, 1, 2, 0, 2],
       },
       {
@@ -770,10 +770,10 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         name: "surrender",
         does: "gives up, waving a white flag",
         frames: [
-          ["            ", "   .----. «{wood}|»«~»", "  ( -  - )«{wood}|» ", "  (______)/ ", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----. «{wood}|»«=»", "  ( -  - )«{wood}|» ", "  (______)/ ", "  \\/\\/\\/\\/  "],
+          ["            ", "   .----. «{wood}|»«{white}~»", "  ( -  - )«{wood}|» ", "  (______)/ ", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----. «{wood}|»«{white}=»", "  ( -  - )«{wood}|» ", "  (______)/ ", "  \\/\\/\\/\\/  "],
         ],
-        faces: ["~(--)~«{wood}|»«~»", "~(--)~«{wood}|»«=»"],
+        faces: ["~(--)~«{wood}|»«{white}~»", "~(--)~«{wood}|»«{white}=»"],
         sequence: [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
       },
     ],
@@ -823,7 +823,7 @@ const PROP_END = "\x02";
 const PROP_COLORS: Record<string, string> = {
   ember: "#FF4500", wood: "#A0522D", coffee: "#C68642", orange: "#FF8C00", steel: "#4682B4", red: "#E0303A",
   water: "#1E90FF", sky: "#5DADE2", purple: "#B432DC", green: "#32B432", slate: "#6A5ACD", gold: "#E0A800",
-  blue: "#3C78D8", pink: "#FF5F87", paper: "#C8C8C8", smoke: "#8C8C8C",
+  blue: "#3C78D8", pink: "#FF5F87", white: "#C8C8C8", smoke: "#8C8C8C",
 };
 const hexSgr = (hex: string) => `\x1b[38;2;${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(";")}m`;
 const markProps = (text: string) =>

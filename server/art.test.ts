@@ -295,12 +295,10 @@ describe("getStatusFrames", () => {
     }
   });
 
-  test("the cigarette, the pipe and the coffee, smoke and steam included, have no part in the buddy's color", () => {
+  test("no object has a part in the buddy's color: smoke, steam, a yoyo's string and a white flag carry their own", () => {
     const { frames, minimalFrames } = markedStatusFrames(octopus);
-    const drinksOrSmokes = [...frames, ...minimalFrames].filter((text) => ["===", "___u", "u___", "c[_]"].some((object) => text.includes(object)));
 
-    expect(drinksOrSmokes.length).toBeGreaterThan(0);
-    for (const text of drinksOrSmokes) {
+    for (const text of [...frames, ...minimalFrames]) {
       expect(text.split("\x01").slice(1).every((part) => part.startsWith("\x1b[")), JSON.stringify(text)).toBe(true);
     }
   });
