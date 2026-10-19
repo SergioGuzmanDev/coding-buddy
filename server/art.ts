@@ -293,12 +293,12 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         name: "cigarette",
         does: "smokes a cigarette",
         frames: [
-          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«==={ember}*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«==={ember}*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} )   «~»", "  (______)«==={ember}*»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.    «~»", "  ( {E}  {E} )  «~»", "  (______)«==={ember}*»", "  \\/\\/\\/\\/  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«{paper}==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«{paper}==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )   «{smoke}~»", "  (______)«{paper}==={ember}*»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    «{smoke}~»", "  ( {E}  {E} )  «{smoke}~»", "  (______)«{paper}==={ember}*»", "  \\/\\/\\/\\/  "],
         ],
-        faces: [" «{ember}*»«===»~({E}{E})~", " «{ember}*»«===»~(--)~", "«°»«{ember}*»«===»~({E}{E})~", "«~»«{ember}*»«===»~({E}{E})~"],
+        faces: [" «{ember}*»«{paper}===»~({E}{E})~", " «{ember}*»«{paper}===»~(--)~", "«{smoke}°»«{ember}*»«{paper}===»~({E}{E})~", "«{smoke}~»«{ember}*»«{paper}===»~({E}{E})~"],
         sequence: SMOKE_SEQUENCE,
       },
       {
@@ -307,10 +307,10 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         frames: [
           ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«{wood}___u»", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.   ", "  ( -  - )  ", "  (______)«{wood}___u»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.   ", "  ( {E}  {E} )   «~»", "  (______)«{wood}___u»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.    «~»", "  ( {E}  {E} )  «~»", "  (______)«{wood}___u»", "  \\/\\/\\/\\/  "],
+          ["            ", "   .----.   ", "  ( {E}  {E} )   «{smoke}~»", "  (______)«{wood}___u»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    «{smoke}~»", "  ( {E}  {E} )  «{smoke}~»", "  (______)«{wood}___u»", "  \\/\\/\\/\\/  "],
         ],
-        faces: [" «{wood}u___»~({E}{E})~", " «{wood}u___»~(--)~", "«°»«{wood}u___»~({E}{E})~", "«~»«{wood}u___»~({E}{E})~"],
+        faces: [" «{wood}u___»~({E}{E})~", " «{wood}u___»~(--)~", "«{smoke}°»«{wood}u___»~({E}{E})~", "«{smoke}~»«{wood}u___»~({E}{E})~"],
         sequence: SMOKE_SEQUENCE,
       },
       {
@@ -823,7 +823,7 @@ const PROP_END = "\x02";
 const PROP_COLORS: Record<string, string> = {
   ember: "#FF4500", wood: "#A0522D", coffee: "#C68642", orange: "#FF8C00", steel: "#4682B4", red: "#E0303A",
   water: "#1E90FF", sky: "#5DADE2", purple: "#B432DC", green: "#32B432", slate: "#6A5ACD", gold: "#E0A800",
-  blue: "#3C78D8", pink: "#FF5F87",
+  blue: "#3C78D8", pink: "#FF5F87", paper: "#C8C8C8", smoke: "#8C8C8C",
 };
 const hexSgr = (hex: string) => `\x1b[38;2;${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(";")}m`;
 const markProps = (text: string) =>

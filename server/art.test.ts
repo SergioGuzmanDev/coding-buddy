@@ -287,6 +287,8 @@ describe("getStatusFrames", () => {
       const drawn = (text: string) => expect(texts.some((t) => t.includes(text)), JSON.stringify(text)).toBe(true);
       drawn(`${sgr("255;69;0")}*\x02`);
       drawn(`${sgr("160;82;45")}${texts === frames ? "___u" : "u___"}\x02`);
+      drawn(`${sgr("200;200;200")}===`);
+      drawn(`${sgr("140;140;140")}~\x02`);
       drawn(`${sgr("255;95;135")}<3\x02`);
       drawn(`${sgr("93;173;226")}z`);
       drawn(`${sgr("255;140;0")}<><\x02`);
