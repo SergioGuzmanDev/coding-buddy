@@ -339,10 +339,10 @@ export const STATUS_MOVES: Partial<Record<Species, { pool: StatusMove[]; idle: S
         does: "sips a coffee",
         frames: [
           ["            ", "   .----.   ", "  ( {E}  {E} )  ", "  (______)«{coffee}c[_]»", "  /\\/\\/\\/\\  "],
-          ["            ", "   .----.    «~»", "  ( {E}  {E} )  «~»", "  (______)«{coffee}c[_]»", "  /\\/\\/\\/\\  "],
+          ["            ", "   .----.    «{smoke}~»", "  ( {E}  {E} )  «{smoke}~»", "  (______)«{coffee}c[_]»", "  /\\/\\/\\/\\  "],
           ["            ", "   .----.   ", "  ( -  - )«{coffee}c[_]»", "  (______)  ", "  /\\/\\/\\/\\  "],
         ],
-        faces: ["~({E}{E})~«{coffee}c[_]»", "~({E}{E})~«{coffee}c[_]»«~»", "~(--)~«{coffee}c[_]»"],
+        faces: ["~({E}{E})~«{coffee}c[_]»", "~({E}{E})~«{coffee}c[_]»«{smoke}~»", "~(--)~«{coffee}c[_]»"],
         sequence: [0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 2, 2, 0, 0],
       },
       OCTOPUS_SLEEP,
